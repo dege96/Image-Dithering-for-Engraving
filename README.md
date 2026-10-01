@@ -1,6 +1,6 @@
 # Gravyr-preview
 
-Mobilanpassad webbapp för lasergravyr-förhandsvisning. Kunden laddar upp ett foto, bakgrunden tas bort i webbläsaren, och resultatet visas live med Jarvis-, Atkinson- eller Threshold-dithering. PNG exporteras till offert.
+Mobilanpassad webbapp för lasergravyr-förhandsvisning. Kunden laddar upp ett foto, kan valfritt ta bort bakgrund, och ser resultatet live med Jarvis-, Atkinson- eller Threshold-dithering. PNG exporteras till offert.
 
 All bildbehandling körs lokalt i webbläsaren. Pixlar lämnar inte enheten.
 
@@ -34,29 +34,34 @@ Sätt `NEXT_PUBLIC_QUOTE_URL` till din riktiga offert-/kontakt-URL. I v1 bifogar
 ## Flöde
 
 1. Ladda upp JPG/PNG/WebP
-2. Bakgrund tas bort en gång (`@imgly/background-removal`) och cacheas
-3. Bilden beskärs till motivet + padding
+2. Valfritt: kryssa i **Ta bort bakgrund** (av som default). Då körs `@imgly/background-removal` en gång per bild och resultatet cacheas; av = originalbilden används utan modell
+3. Vid BG-removal beskärs motivet + padding; utan BG körs grayscale/dither på hela originalet
 4. Live preview: Rec.709-grayscale + vald algoritm (max 1200×1200)
-5. Exportera PNG i full beskuren upplösning (ingen uppskalning)
+5. Exportera PNG i full beskuren/original upplösning (ingen uppskalning)
 6. Filnamn: `gravyr-{algorithm}-threshold-{n}.png`
 7. Metadata `{ algorithm, threshold, version: "1.0" }` bäddas in som PNG tEXt när det går
 
-## Iframe
+## Byta offert-URL
 
-Sidan är en enkel yta som kan bäddas in:
+- Lokalt: `.env.local` → `NEXT_PUBLIC_QUOTE_URL=https://…` och starta om dev-servern
+- Vercel: sätt samma variabel under Project → Settings → Environment Variables (Preview + Production) och redeploy (`NEXT_PUBLIC_*` bakas in vid build)
+- Default om variabeln saknas: `/offert`
+
+## Iframe
 
 ```html
 <iframe
-  src="https://din-domän.se/"
+  src="https://DIN-VERCEL-URL.vercel.app/"
   title="Gravyr-preview"
   style="width:100%;min-height:720px;border:0;"
   allow="clipboard-write"
+  loading="lazy"
 ></iframe>
 ```
 
 ## Bakgrundsmodell
 
-Första gången en bild förbereds hämtas AI-modellen för bakgrundsborttagning från CDN (`@imgly/background-removal`). Det kan ta några sekunder. Därefter återanvänds den i sessionen. Parametrar (algoritm/tröskel) kör om endast dithering — inte modellen.
+Modellen körs bara när **Ta bort bakgrund** är ikryssad. Första gången hämtas den från CDN (`@imgly/background-removal`) och resultatet cacheas per uppladdad bild. Avmarkera = tillbaka till originalpipeline utan transparent mask. Algoritm/tröskel kör om endast dithering.
 
 ## Stack
 

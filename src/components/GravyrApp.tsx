@@ -7,11 +7,16 @@ import { ExportButton } from "@/components/ExportButton";
 import { ImagePreview } from "@/components/ImagePreview";
 import { ImageUploader } from "@/components/ImageUploader";
 import { QuoteButton } from "@/components/QuoteButton";
+import { RemoveBackgroundToggle } from "@/components/RemoveBackgroundToggle";
 import { ThresholdSlider } from "@/components/ThresholdSlider";
 import { Button } from "@/components/ui/button";
 import { downloadBlob, exportPNG } from "@/export/exportPNG";
 import { cropToContent } from "@/image/cropToContent";
-import { imageDataToObjectUrl, loadImage, imageToImageData } from "@/image/loadImage";
+import {
+  imageDataToObjectUrl,
+  imageToImageData,
+  loadImage,
+} from "@/image/loadImage";
 import { processImageAsync } from "@/image/processImageClient";
 import { removeBackground } from "@/image/removeBackground";
 import { messageForError } from "@/lib/errors";
@@ -26,10 +31,14 @@ import {
 
 type AppState = {
   originalImage: ImageData | null;
+  /** Cachead BG-removal (beskuren). null tills modellen körts en gång för aktuell bild. */
+  bgRemovedImage: ImageData | null;
+  /** Källa till dither/export — original eller bgRemoved beroende på toggle. */
   foregroundImage: ImageData | null;
   processedImage: ImageData | null;
   algorithm: DitherAlgorithm;
   threshold: number;
+  removeBackgroundEnabled: boolean;
   isPreparing: boolean;
   isProcessing: boolean;
   isExporting: boolean;
@@ -39,10 +48,12 @@ type AppState = {
 
 const initialState: AppState = {
   originalImage: null,
+  bgRemovedImage: null,
   foregroundImage: null,
   processedImage: null,
   algorithm: DEFAULT_ALGORITHM,
   threshold: DEFAULT_THRESHOLD,
+  removeBackgroundEnabled: false,
   isPreparing: false,
   isProcessing: false,
   isExporting: false,
@@ -61,19 +72,29 @@ export function GravyrApp() {
   const [prepareLabel, setPrepareLabel] = useState("Förbereder din bild…");
   const requestId = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sourceFileRef = useRef<File | null>(null);
+  const bgCacheRef = useRef<ImageData | null>(null);
+  const removeBgEnabledRef = useRef(false);
 
   const revoke = (url: string | null) => {
     if (url) URL.revokeObjectURL(url);
   };
 
-  const reset = () => {
+  const reset = (keepToggle = true) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     requestId.current += 1;
     revoke(originalUrl);
     revoke(processedUrl);
     setOriginalUrl(null);
     setProcessedUrl(null);
-    setState(initialState);
+    sourceFileRef.current = null;
+    bgCacheRef.current = null;
+    setState((s) => ({
+      ...initialState,
+      removeBackgroundEnabled: keepToggle
+        ? s.removeBackgroundEnabled
+        : false,
+    }));
   };
 
   const runProcess = useCallback(
@@ -136,10 +157,27 @@ export function GravyrApp() {
     [runProcess],
   );
 
+  const ensureBgRemoved = useCallback(async (file: File): Promise<ImageData> => {
+    if (bgCacheRef.current) {
+      return bgCacheRef.current;
+    }
+    setPrepareLabel("Tar bort bakgrund…");
+    const withoutBg = await removeBackground(file);
+    const cropped = cropToContent(withoutBg);
+    bgCacheRef.current = cropped;
+    return cropped;
+  }, []);
+
   const handleFile = async (file: File) => {
-    reset();
+    const enabled = removeBgEnabledRef.current;
+    reset(true);
+    removeBgEnabledRef.current = enabled;
+    sourceFileRef.current = file;
+    bgCacheRef.current = null;
+
     setState((s) => ({
       ...s,
+      removeBackgroundEnabled: enabled,
       isPreparing: true,
       error: null,
     }));
@@ -150,24 +188,99 @@ export function GravyrApp() {
       const original = imageToImageData(img);
       const origUrl = await imageDataToObjectUrl(original);
       setOriginalUrl(origUrl);
-      setState((s) => ({ ...s, originalImage: original }));
 
-      setPrepareLabel("Tar bort bakgrund…");
-      const withoutBg = await removeBackground(file);
-      const cropped = cropToContent(withoutBg);
+      let foreground: ImageData = original;
+      let bgRemoved: ImageData | null = null;
+
+      if (enabled) {
+        bgRemoved = await ensureBgRemoved(file);
+        foreground = bgRemoved;
+      }
 
       setState((s) => ({
         ...s,
-        foregroundImage: cropped,
+        originalImage: original,
+        bgRemovedImage: bgRemoved,
+        foregroundImage: foreground,
+        removeBackgroundEnabled: enabled,
         isPreparing: false,
       }));
 
-      await runProcess(cropped, DEFAULT_ALGORITHM, DEFAULT_THRESHOLD);
+      await runProcess(foreground, DEFAULT_ALGORITHM, DEFAULT_THRESHOLD);
     } catch (err) {
       setState((s) => ({
         ...s,
         isPreparing: false,
         isProcessing: false,
+        error: messageForError(err),
+      }));
+    }
+  };
+
+  const setRemoveBackgroundEnabled = async (enabled: boolean) => {
+    removeBgEnabledRef.current = enabled;
+    setState((s) => ({ ...s, removeBackgroundEnabled: enabled, error: null }));
+
+    const original = state.originalImage;
+    if (!original) return;
+
+    if (!enabled) {
+      // Tillbaka till originalpipeline — ingen transparent mask
+      setState((s) => ({
+        ...s,
+        foregroundImage: original,
+        removeBackgroundEnabled: false,
+      }));
+      scheduleProcess(original, state.algorithm, state.threshold, true);
+      return;
+    }
+
+    const file = sourceFileRef.current;
+    if (!file) {
+      setState((s) => ({
+        ...s,
+        error: messageForError(new Error("PROCESS_FAIL")),
+      }));
+      return;
+    }
+
+    // Använd cache om den finns, annars kör modellen en gång
+    if (bgCacheRef.current || state.bgRemovedImage) {
+      const cached = bgCacheRef.current ?? state.bgRemovedImage!;
+      bgCacheRef.current = cached;
+      setState((s) => ({
+        ...s,
+        bgRemovedImage: cached,
+        foregroundImage: cached,
+        removeBackgroundEnabled: true,
+      }));
+      scheduleProcess(cached, state.algorithm, state.threshold, true);
+      return;
+    }
+
+    const id = ++requestId.current;
+    setState((s) => ({ ...s, isPreparing: true, error: null }));
+    setPrepareLabel("Tar bort bakgrund…");
+    try {
+      const bgRemoved = await ensureBgRemoved(file);
+      if (id !== requestId.current) return;
+      setState((s) => ({
+        ...s,
+        bgRemovedImage: bgRemoved,
+        foregroundImage: bgRemoved,
+        removeBackgroundEnabled: true,
+        isPreparing: false,
+      }));
+      await runProcess(bgRemoved, state.algorithm, state.threshold);
+    } catch (err) {
+      if (id !== requestId.current) return;
+      // Misslyckad BG — återställ toggle och behåll originalpipeline
+      removeBgEnabledRef.current = false;
+      setState((s) => ({
+        ...s,
+        removeBackgroundEnabled: false,
+        foregroundImage: original,
+        isPreparing: false,
         error: messageForError(err),
       }));
     }
@@ -216,7 +329,7 @@ export function GravyrApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hasForeground = Boolean(state.foregroundImage);
+  const hasImage = Boolean(state.originalImage || state.foregroundImage);
   const previewSrc =
     state.viewMode === "original" ? originalUrl : processedUrl;
   const previewAlt =
@@ -240,18 +353,24 @@ export function GravyrApp() {
         </p>
       </header>
 
-      {!hasForeground && !state.isPreparing && (
-        <ImageUploader disabled={busy} onFile={handleFile} />
+      {!hasImage && !state.isPreparing && (
+        <div className="space-y-3">
+          <ImageUploader disabled={busy} onFile={handleFile} />
+          <RemoveBackgroundToggle
+            checked={state.removeBackgroundEnabled}
+            onCheckedChange={(v) => {
+              removeBgEnabledRef.current = v;
+              setState((s) => ({ ...s, removeBackgroundEnabled: v }));
+            }}
+            disabled={busy}
+          />
+        </div>
       )}
 
-      {(hasForeground || state.isPreparing) && (
+      {(hasImage || state.isPreparing) && (
         <>
           <ImagePreview
-            src={
-              state.isPreparing
-                ? originalUrl
-                : previewSrc
-            }
+            src={state.isPreparing ? originalUrl : previewSrc}
             alt={state.isPreparing ? "Uppladdad bild" : previewAlt}
             isProcessing={state.isPreparing || state.isProcessing}
           />
@@ -262,7 +381,7 @@ export function GravyrApp() {
             </p>
           )}
 
-          {hasForeground && (
+          {hasImage && (
             <div className="space-y-5 rounded-xl border border-border bg-card p-4 sm:p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <CompareToggle
@@ -276,12 +395,20 @@ export function GravyrApp() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={reset}
+                  onClick={() => reset(true)}
                   disabled={state.isExporting}
                 >
                   Välj ny bild
                 </Button>
               </div>
+
+              <RemoveBackgroundToggle
+                checked={state.removeBackgroundEnabled}
+                onCheckedChange={(v) => {
+                  void setRemoveBackgroundEnabled(v);
+                }}
+                disabled={busy}
+              />
 
               <DitherSelector
                 value={state.algorithm}
@@ -298,12 +425,12 @@ export function GravyrApp() {
               <div className="flex flex-col gap-2 sm:flex-row">
                 <ExportButton
                   onClick={handleExport}
-                  disabled={!hasForeground || state.isPreparing}
+                  disabled={!state.foregroundImage || state.isPreparing}
                   isExporting={state.isExporting}
                 />
                 <QuoteButton
                   href={getQuoteUrl()}
-                  disabled={!hasForeground}
+                  disabled={!state.foregroundImage}
                 />
               </div>
             </div>
@@ -322,7 +449,7 @@ export function GravyrApp() {
             variant="ghost"
             size="sm"
             className="mt-2"
-            onClick={reset}
+            onClick={() => reset(true)}
           >
             Välj ny bild
           </Button>
