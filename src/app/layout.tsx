@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Gravyr-preview | Lasergravyr",
   description:
-    "Ladda upp ett foto, se lasergravyr-preview med Jarvis/Atkinson/Threshold och exportera PNG till offert.",
+    "Ladda upp ett foto, se lasergravyr-preview med flera dither-algoritmer och exportera PNG/SVG till offert.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

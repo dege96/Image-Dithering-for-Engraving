@@ -1,8 +1,15 @@
 "use client";
 
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   ALGORITHM_LABELS,
+  DITHER_ALGORITHMS,
   type DitherAlgorithm,
 } from "@/presets/default";
 
@@ -12,31 +19,32 @@ type DitherSelectorProps = {
   disabled?: boolean;
 };
 
-const ALGORITHMS: DitherAlgorithm[] = ["jarvis", "atkinson", "threshold"];
-
 export function DitherSelector({
   value,
   onChange,
   disabled,
 }: DitherSelectorProps) {
   return (
-    <Tabs
-      value={value}
-      onValueChange={(v) => onChange(v as DitherAlgorithm)}
-      className="w-full"
-    >
-      <TabsList className="grid h-auto w-full grid-cols-3 gap-1 p-1">
-        {ALGORITHMS.map((algo) => (
-          <TabsTrigger
-            key={algo}
-            value={algo}
-            disabled={disabled}
-            className="px-2 py-2 text-xs sm:text-sm"
-          >
-            {ALGORITHM_LABELS[algo]}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-    </Tabs>
+    <div className="space-y-2">
+      <label htmlFor="dither-algorithm" className="text-sm font-medium">
+        Algoritm
+      </label>
+      <Select
+        value={value}
+        onValueChange={(v) => onChange(v as DitherAlgorithm)}
+        disabled={disabled}
+      >
+        <SelectTrigger id="dither-algorithm" className="w-full">
+          <SelectValue placeholder="Välj algoritm" />
+        </SelectTrigger>
+        <SelectContent>
+          {DITHER_ALGORITHMS.map((algo) => (
+            <SelectItem key={algo} value={algo}>
+              {ALGORITHM_LABELS[algo]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
