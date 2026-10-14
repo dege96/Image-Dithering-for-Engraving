@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CompareToggle } from "@/components/CompareToggle";
 import { DitherSelector } from "@/components/DitherSelector";
 import { ExportButton } from "@/components/ExportButton";
+import { ExportSvgButton } from "@/components/ExportSvgButton";
 import { ImagePreview } from "@/components/ImagePreview";
 import { ImageUploader } from "@/components/ImageUploader";
 import { QuoteButton } from "@/components/QuoteButton";
@@ -11,6 +12,7 @@ import { RemoveBackgroundToggle } from "@/components/RemoveBackgroundToggle";
 import { ThresholdSlider } from "@/components/ThresholdSlider";
 import { Button } from "@/components/ui/button";
 import { downloadBlob, exportPNG } from "@/export/exportPNG";
+import { exportSVG } from "@/export/exportSVG";
 import { cropToContent } from "@/image/cropToContent";
 import {
   imageDataToObjectUrl,
@@ -42,6 +44,7 @@ type AppState = {
   isPreparing: boolean;
   isProcessing: boolean;
   isExporting: boolean;
+  isExportingSvg: boolean;
   viewMode: ViewMode;
   error: string | null;
 };
@@ -57,6 +60,7 @@ const initialState: AppState = {
   isPreparing: false,
   isProcessing: false,
   isExporting: false,
+  isExportingSvg: false,
   viewMode: "gravyr",
   error: null,
 };
@@ -320,6 +324,26 @@ export function GravyrApp() {
     }
   };
 
+  const handleExportSvg = async () => {
+    if (!state.foregroundImage) return;
+    setState((s) => ({ ...s, isExportingSvg: true, error: null }));
+    try {
+      const { blob, filename } = await exportSVG(
+        state.foregroundImage,
+        state.algorithm,
+        state.threshold,
+      );
+      downloadBlob(blob, filename);
+      setState((s) => ({ ...s, isExportingSvg: false }));
+    } catch {
+      setState((s) => ({
+        ...s,
+        isExportingSvg: false,
+        error: messageForError(new Error("EXPORT_FAIL")),
+      }));
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -336,7 +360,11 @@ export function GravyrApp() {
     state.viewMode === "original"
       ? "Originalbild"
       : "Förhandsvisning av lasergravyr";
-  const busy = state.isPreparing || state.isProcessing || state.isExporting;
+  const busy =
+    state.isPreparing ||
+    state.isProcessing ||
+    state.isExporting ||
+    state.isExportingSvg;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:py-10">
@@ -348,8 +376,8 @@ export function GravyrApp() {
           Gravyr-preview
         </h1>
         <p className="text-sm text-muted-foreground sm:text-base">
-          Ladda upp ett foto, se hur det blir som lasergravyr och ladda ner en
-          PNG till din offert.
+          Ladda upp ett foto, se hur det blir som lasergravyr och ladda ner PNG
+          eller SVG till din offert.
         </p>
       </header>
 
@@ -396,7 +424,7 @@ export function GravyrApp() {
                   variant="ghost"
                   size="sm"
                   onClick={() => reset(true)}
-                  disabled={state.isExporting}
+                  disabled={state.isExporting || state.isExportingSvg}
                 >
                   Välj ny bild
                 </Button>
@@ -422,11 +450,16 @@ export function GravyrApp() {
                 disabled={busy}
               />
 
-              <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <ExportButton
                   onClick={handleExport}
                   disabled={!state.foregroundImage || state.isPreparing}
                   isExporting={state.isExporting}
+                />
+                <ExportSvgButton
+                  onClick={handleExportSvg}
+                  disabled={!state.foregroundImage || state.isPreparing}
+                  isExporting={state.isExportingSvg}
                 />
                 <QuoteButton
                   href={getQuoteUrl()}

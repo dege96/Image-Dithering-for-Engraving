@@ -1,6 +1,6 @@
 # Gravyr-preview
 
-Mobilanpassad webbapp för lasergravyr-förhandsvisning. Kunden laddar upp ett foto, kan valfritt ta bort bakgrund, och ser resultatet live med Jarvis-, Atkinson- eller Threshold-dithering. PNG exporteras till offert.
+Mobilanpassad webbapp för lasergravyr-förhandsvisning. Kunden laddar upp ett foto, kan valfritt ta bort bakgrund, och ser resultatet live med Jarvis-, Atkinson- eller Threshold-dithering. PNG och SVG exporteras till offert.
 
 All bildbehandling körs lokalt i webbläsaren. Pixlar lämnar inte enheten.
 
@@ -37,9 +37,10 @@ Sätt `NEXT_PUBLIC_QUOTE_URL` till din riktiga offert-/kontakt-URL. I v1 bifogar
 2. Valfritt: kryssa i **Ta bort bakgrund** (av som default). Då körs `@imgly/background-removal` en gång per bild och resultatet cacheas; av = originalbilden används utan modell
 3. Vid BG-removal beskärs motivet + padding; utan BG körs grayscale/dither på hela originalet
 4. Live preview: Rec.709-grayscale + vald algoritm (max 1200×1200)
-5. Exportera PNG i full beskuren/original upplösning (ingen uppskalning)
-6. Filnamn: `gravyr-{algorithm}-threshold-{n}.png`
-7. Metadata `{ algorithm, threshold, version: "1.0" }` bäddas in som PNG tEXt när det går
+5. Exportera PNG eller SVG i full pipeline-upplösning (ingen preview-cap, ingen size-kontroll / uppskalning)
+6. Filnamn: `gravyr-{algorithm}-threshold-{n}.png` / `.svg`
+7. Metadata `{ algorithm, threshold, version: "1.0" }` i PNG tEXt respektive SVG-kommentar/`data-*`
+8. SVG: svarta dither-pixlar som run-length-`<rect>` (vektoriserad bitmap, alltid högsta upplösning)
 
 ## Byta offert-URL
 
@@ -76,7 +77,7 @@ src/
   components/   UI (uploader, preview, tabs, slider, export, offert)
   image/        load, crop, grayscale, resize, processImage, BG-adapter
   dithering/    jarvis, atkinson, threshold
-  export/       PNG + metadata
+  export/       PNG/SVG + metadata
   workers/      processImage.worker.ts
   presets/      defaults
 ```
