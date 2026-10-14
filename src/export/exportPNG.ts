@@ -3,7 +3,7 @@ import {
   clampThreshold,
   type DitherAlgorithm,
 } from "@/presets/default";
-import { processImage } from "@/image/processImage";
+import { processImageAsync } from "@/image/processImageClient";
 
 export type ExportMetadata = {
   algorithm: DitherAlgorithm;
@@ -53,24 +53,24 @@ async function encodePngWithMetadata(
     const copy = Uint8Array.from(encoded);
     return new Blob([copy], { type: "image/png" });
   } catch {
-    // Fallback: metadata finns i filnamnet
     return baseBlob;
   }
 }
 
 /**
- * Exporterar gravyr-PNG i full beskuren upplösning (ingen uppskalning).
+ * Exporterar gravyr-PNG i full beskuren upplösning via Web Worker när möjligt.
  */
 export async function exportPNG(
   foregroundImage: ImageData,
   algorithm: DitherAlgorithm,
   threshold: number,
+  options?: { normalize?: boolean },
 ): Promise<{ blob: Blob; filename: string; metadata: ExportMetadata }> {
   const clamped = clampThreshold(threshold);
-  const processed = processImage(foregroundImage, {
+  const processed = await processImageAsync(foregroundImage, {
     algorithm,
     threshold: clamped,
-    // ingen maxSize → ingen nedskalning, ingen uppskalning
+    normalize: options?.normalize,
   });
 
   const metadata: ExportMetadata = {

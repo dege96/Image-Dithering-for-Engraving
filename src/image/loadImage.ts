@@ -1,7 +1,7 @@
+import { validateImageFile } from "@/lib/validateImageFile";
+
 export async function loadImage(file: File): Promise<HTMLImageElement> {
-  if (!file.type.startsWith("image/")) {
-    throw new Error("INVALID_IMAGE");
-  }
+  validateImageFile(file);
 
   const url = URL.createObjectURL(file);
   try {

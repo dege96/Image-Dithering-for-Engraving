@@ -1,12 +1,16 @@
 export const ERROR_MESSAGES = {
   INVALID_IMAGE:
     "Ogiltig bildfil. Ladda upp JPG, PNG eller WebP.",
+  IMAGE_TOO_LARGE:
+    "Bilden är för stor. Välj en fil under 25 MB.",
   BG_FAIL:
     "Kunde inte ta bort bakgrunden. Prova en annan bild eller försök igen.",
   PROCESS_FAIL:
     "Kunde inte bearbeta bilden. Prova igen eller välj en ny bild.",
   EXPORT_FAIL:
     "Kunde inte exportera PNG. Prova igen.",
+  EXPORT_SVG_FAIL:
+    "Kunde inte exportera SVG. Prova igen.",
   UNKNOWN: "Något gick fel. Prova igen.",
 } as const;
 

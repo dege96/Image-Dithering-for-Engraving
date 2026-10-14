@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { OffertForm } from "@/app/offert/OffertForm";
 
 export const metadata: Metadata = {
   title: "Offert | Gravyr-preview",
-  description: "Skicka din exporterade gravyr-PNG för offert.",
+  description: "Skicka din gravyrbild för offert.",
 };
 
 export default function OffertPage() {
@@ -15,20 +14,14 @@ export default function OffertPage() {
           Offert
         </p>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Skicka din gravyr för offert
+          Skicka din gravyr
         </h1>
         <p className="text-muted-foreground">
-          Ladda ner PNG:en från Gravyr-preview och bifoga den i ditt
-          offertformulär. Sätt{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
-            NEXT_PUBLIC_QUOTE_URL
-          </code>{" "}
-          till din riktiga offertsida när den finns.
+          Vi har förberett din bild. Fyll i dina uppgifter så öppnas ett mejl
+          där du bifogar den nedladdade PNG-filen.
         </p>
       </div>
-      <Button asChild>
-        <Link href="/">Tillbaka till preview</Link>
-      </Button>
+      <OffertForm />
     </main>
   );
 }

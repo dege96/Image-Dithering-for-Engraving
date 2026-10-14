@@ -1,14 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CompareToggle } from "@/components/CompareToggle";
+import { useRouter } from "next/navigation";
 import { DitherSelector } from "@/components/DitherSelector";
 import { ExportButton } from "@/components/ExportButton";
 import { ExportSvgButton } from "@/components/ExportSvgButton";
 import { ImagePreview } from "@/components/ImagePreview";
 import { ImageUploader } from "@/components/ImageUploader";
 import { QuoteButton } from "@/components/QuoteButton";
+import { NormalizeLevelsToggle } from "@/components/NormalizeLevelsToggle";
 import { RemoveBackgroundToggle } from "@/components/RemoveBackgroundToggle";
+import { SettingsModeToggle } from "@/components/SettingsModeToggle";
+import { StylePicker } from "@/components/StylePicker";
 import { ThresholdSlider } from "@/components/ThresholdSlider";
 import { Button } from "@/components/ui/button";
 import { downloadBlob, exportPNG } from "@/export/exportPNG";
@@ -23,54 +26,62 @@ import { processImageAsync } from "@/image/processImageClient";
 import { removeBackground } from "@/image/removeBackground";
 import { messageForError } from "@/lib/errors";
 import {
+  getQuoteUrl,
+  isInternalQuoteUrl,
+  saveQuoteSession,
+} from "@/lib/quote";
+import {
+  CUSTOMER_STYLES,
   DEFAULT_ALGORITHM,
   DEFAULT_THRESHOLD,
+  EXPORT_DPI,
   PREVIEW_MAX_SIZE,
   SLIDER_DEBOUNCE_MS,
   clampThreshold,
+  exportSizeMm,
+  type CustomerStyle,
   type DitherAlgorithm,
-  type ViewMode,
+  type SettingsMode,
 } from "@/presets/default";
 
 type AppState = {
   originalImage: ImageData | null;
-  /** Cachead BG-removal (beskuren). null tills modellen körts en gång för aktuell bild. */
   bgRemovedImage: ImageData | null;
-  /** Källa till dither/export — original eller bgRemoved beroende på toggle. */
   foregroundImage: ImageData | null;
-  processedImage: ImageData | null;
   algorithm: DitherAlgorithm;
   threshold: number;
   removeBackgroundEnabled: boolean;
+  normalizeLevelsEnabled: boolean;
   isPreparing: boolean;
   isProcessing: boolean;
   isExporting: boolean;
   isExportingSvg: boolean;
-  viewMode: ViewMode;
+  isPreparingQuote: boolean;
+  settingsMode: SettingsMode;
   error: string | null;
+  exportNotice: string | null;
 };
 
 const initialState: AppState = {
   originalImage: null,
   bgRemovedImage: null,
   foregroundImage: null,
-  processedImage: null,
   algorithm: DEFAULT_ALGORITHM,
   threshold: DEFAULT_THRESHOLD,
   removeBackgroundEnabled: false,
+  normalizeLevelsEnabled: false,
   isPreparing: false,
   isProcessing: false,
   isExporting: false,
   isExportingSvg: false,
-  viewMode: "gravyr",
+  isPreparingQuote: false,
+  settingsMode: "simple",
   error: null,
+  exportNotice: null,
 };
 
-function getQuoteUrl(): string {
-  return process.env.NEXT_PUBLIC_QUOTE_URL || "/offert";
-}
-
 export function GravyrApp() {
+  const router = useRouter();
   const [state, setState] = useState<AppState>(initialState);
   const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [processedUrl, setProcessedUrl] = useState<string | null>(null);
@@ -80,24 +91,48 @@ export function GravyrApp() {
   const sourceFileRef = useRef<File | null>(null);
   const bgCacheRef = useRef<ImageData | null>(null);
   const removeBgEnabledRef = useRef(false);
+  const originalUrlRef = useRef<string | null>(null);
+  const processedUrlRef = useRef<string | null>(null);
+  const algorithmRef = useRef(state.algorithm);
+  const thresholdRef = useRef(state.threshold);
+  const normalizeRef = useRef(state.normalizeLevelsEnabled);
+  const foregroundRef = useRef<ImageData | null>(null);
+
+  algorithmRef.current = state.algorithm;
+  thresholdRef.current = state.threshold;
+  normalizeRef.current = state.normalizeLevelsEnabled;
+  foregroundRef.current = state.foregroundImage;
 
   const revoke = (url: string | null) => {
     if (url) URL.revokeObjectURL(url);
   };
 
+  const setOriginalUrlSafe = useCallback((url: string | null) => {
+    revoke(originalUrlRef.current);
+    originalUrlRef.current = url;
+    setOriginalUrl(url);
+  }, []);
+
+  const setProcessedUrlSafe = useCallback((url: string | null) => {
+    revoke(processedUrlRef.current);
+    processedUrlRef.current = url;
+    setProcessedUrl(url);
+  }, []);
+
   const reset = (keepToggle = true) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     requestId.current += 1;
-    revoke(originalUrl);
-    revoke(processedUrl);
-    setOriginalUrl(null);
-    setProcessedUrl(null);
+    setOriginalUrlSafe(null);
+    setProcessedUrlSafe(null);
     sourceFileRef.current = null;
     bgCacheRef.current = null;
     setState((s) => ({
       ...initialState,
       removeBackgroundEnabled: keepToggle
         ? s.removeBackgroundEnabled
+        : false,
+      normalizeLevelsEnabled: keepToggle
+        ? s.normalizeLevelsEnabled
         : false,
     }));
   };
@@ -107,6 +142,7 @@ export function GravyrApp() {
       foreground: ImageData,
       algorithm: DitherAlgorithm,
       threshold: number,
+      normalize = normalizeRef.current,
     ) => {
       const id = ++requestId.current;
       const clamped = clampThreshold(threshold);
@@ -116,16 +152,13 @@ export function GravyrApp() {
           algorithm,
           threshold: clamped,
           maxSize: PREVIEW_MAX_SIZE,
+          normalize,
         });
         if (id !== requestId.current) return;
         const url = await imageDataToObjectUrl(result);
-        setProcessedUrl((prev) => {
-          revoke(prev);
-          return url;
-        });
+        setProcessedUrlSafe(url);
         setState((s) => ({
           ...s,
-          processedImage: result,
           isProcessing: false,
         }));
       } catch (err) {
@@ -141,7 +174,7 @@ export function GravyrApp() {
         }));
       }
     },
-    [],
+    [setProcessedUrlSafe],
   );
 
   const scheduleProcess = useCallback(
@@ -150,14 +183,15 @@ export function GravyrApp() {
       algorithm: DitherAlgorithm,
       threshold: number,
       immediate = false,
+      normalize = normalizeRef.current,
     ) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (immediate) {
-        void runProcess(foreground, algorithm, threshold);
+        void runProcess(foreground, algorithm, threshold, normalize);
         return;
       }
       debounceRef.current = setTimeout(() => {
-        void runProcess(foreground, algorithm, threshold);
+        void runProcess(foreground, algorithm, threshold, normalize);
       }, SLIDER_DEBOUNCE_MS);
     },
     [runProcess],
@@ -186,6 +220,7 @@ export function GravyrApp() {
       removeBackgroundEnabled: enabled,
       isPreparing: true,
       error: null,
+      exportNotice: null,
     }));
     setPrepareLabel("Förbereder din bild…");
 
@@ -193,7 +228,7 @@ export function GravyrApp() {
       const img = await loadImage(file);
       const original = imageToImageData(img);
       const origUrl = await imageDataToObjectUrl(original);
-      setOriginalUrl(origUrl);
+      setOriginalUrlSafe(origUrl);
 
       let foreground: ImageData = original;
       let bgRemoved: ImageData | null = null;
@@ -203,16 +238,24 @@ export function GravyrApp() {
         foreground = bgRemoved;
       }
 
+      const defaultStyle = CUSTOMER_STYLES[0];
+
       setState((s) => ({
         ...s,
         originalImage: original,
         bgRemovedImage: bgRemoved,
         foregroundImage: foreground,
+        algorithm: defaultStyle.algorithm,
+        threshold: defaultStyle.threshold,
         removeBackgroundEnabled: enabled,
         isPreparing: false,
       }));
 
-      await runProcess(foreground, DEFAULT_ALGORITHM, DEFAULT_THRESHOLD);
+      await runProcess(
+        foreground,
+        defaultStyle.algorithm,
+        defaultStyle.threshold,
+      );
     } catch (err) {
       setState((s) => ({
         ...s,
@@ -231,13 +274,12 @@ export function GravyrApp() {
     if (!original) return;
 
     if (!enabled) {
-      // Tillbaka till originalpipeline — ingen transparent mask
       setState((s) => ({
         ...s,
         foregroundImage: original,
         removeBackgroundEnabled: false,
       }));
-      scheduleProcess(original, state.algorithm, state.threshold, true);
+      scheduleProcess(original, algorithmRef.current, thresholdRef.current, true);
       return;
     }
 
@@ -250,7 +292,6 @@ export function GravyrApp() {
       return;
     }
 
-    // Använd cache om den finns, annars kör modellen en gång
     if (bgCacheRef.current || state.bgRemovedImage) {
       const cached = bgCacheRef.current ?? state.bgRemovedImage!;
       bgCacheRef.current = cached;
@@ -260,7 +301,7 @@ export function GravyrApp() {
         foregroundImage: cached,
         removeBackgroundEnabled: true,
       }));
-      scheduleProcess(cached, state.algorithm, state.threshold, true);
+      scheduleProcess(cached, algorithmRef.current, thresholdRef.current, true);
       return;
     }
 
@@ -277,10 +318,9 @@ export function GravyrApp() {
         removeBackgroundEnabled: true,
         isPreparing: false,
       }));
-      await runProcess(bgRemoved, state.algorithm, state.threshold);
+      await runProcess(bgRemoved, algorithmRef.current, thresholdRef.current);
     } catch (err) {
       if (id !== requestId.current) return;
-      // Misslyckad BG — återställ toggle och behåll originalpipeline
       removeBgEnabledRef.current = false;
       setState((s) => ({
         ...s,
@@ -292,32 +332,66 @@ export function GravyrApp() {
     }
   };
 
+  const applyStyle = (style: CustomerStyle) => {
+    setState((s) => ({
+      ...s,
+      algorithm: style.algorithm,
+      threshold: style.threshold,
+    }));
+    const foreground = foregroundRef.current;
+    if (foreground) {
+      scheduleProcess(foreground, style.algorithm, style.threshold, true);
+    }
+  };
+
   const setAlgorithm = (algorithm: DitherAlgorithm) => {
     setState((s) => ({ ...s, algorithm }));
-    if (state.foregroundImage) {
-      scheduleProcess(state.foregroundImage, algorithm, state.threshold, true);
+    const foreground = foregroundRef.current;
+    if (foreground) {
+      scheduleProcess(foreground, algorithm, thresholdRef.current, true);
     }
   };
 
   const setThreshold = (threshold: number) => {
     const clamped = clampThreshold(threshold);
     setState((s) => ({ ...s, threshold: clamped }));
-    if (state.foregroundImage) {
-      scheduleProcess(state.foregroundImage, state.algorithm, clamped);
+    const foreground = foregroundRef.current;
+    if (foreground) {
+      scheduleProcess(foreground, algorithmRef.current, clamped);
+    }
+  };
+
+  const setNormalizeLevelsEnabled = (enabled: boolean) => {
+    normalizeRef.current = enabled;
+    setState((s) => ({ ...s, normalizeLevelsEnabled: enabled }));
+    const foreground = foregroundRef.current;
+    if (foreground) {
+      scheduleProcess(
+        foreground,
+        algorithmRef.current,
+        thresholdRef.current,
+        true,
+        enabled,
+      );
     }
   };
 
   const handleExport = async () => {
     if (!state.foregroundImage) return;
-    setState((s) => ({ ...s, isExporting: true, error: null }));
+    setState((s) => ({ ...s, isExporting: true, error: null, exportNotice: null }));
     try {
       const { blob, filename } = await exportPNG(
         state.foregroundImage,
         state.algorithm,
         state.threshold,
+        { normalize: state.normalizeLevelsEnabled },
       );
       downloadBlob(blob, filename);
-      setState((s) => ({ ...s, isExporting: false }));
+      setState((s) => ({
+        ...s,
+        isExporting: false,
+        exportNotice: `PNG sparad: ${filename}`,
+      }));
     } catch {
       setState((s) => ({
         ...s,
@@ -329,19 +403,77 @@ export function GravyrApp() {
 
   const handleExportSvg = async () => {
     if (!state.foregroundImage) return;
-    setState((s) => ({ ...s, isExportingSvg: true, error: null }));
+    setState((s) => ({
+      ...s,
+      isExportingSvg: true,
+      error: null,
+      exportNotice: null,
+    }));
     try {
       const { blob, filename } = await exportSVG(
         state.foregroundImage,
         state.algorithm,
         state.threshold,
+        { normalize: state.normalizeLevelsEnabled },
       );
       downloadBlob(blob, filename);
-      setState((s) => ({ ...s, isExportingSvg: false }));
+      const size = exportSizeMm(
+        state.foregroundImage.width,
+        state.foregroundImage.height,
+      );
+      setState((s) => ({
+        ...s,
+        isExportingSvg: false,
+        exportNotice: `SVG sparad: ${filename} (${size.widthMm.toFixed(1)} × ${size.heightMm.toFixed(1)} mm @ ${EXPORT_DPI} DPI)`,
+      }));
     } catch {
       setState((s) => ({
         ...s,
         isExportingSvg: false,
+        error: messageForError(new Error("EXPORT_SVG_FAIL")),
+      }));
+    }
+  };
+
+  const handleQuote = async () => {
+    if (!state.foregroundImage) return;
+    setState((s) => ({
+      ...s,
+      isPreparingQuote: true,
+      error: null,
+      exportNotice: null,
+    }));
+    try {
+      const { blob, filename, metadata } = await exportPNG(
+        state.foregroundImage,
+        state.algorithm,
+        state.threshold,
+        { normalize: state.normalizeLevelsEnabled },
+      );
+      downloadBlob(blob, filename);
+      saveQuoteSession({
+        filename,
+        algorithm: metadata.algorithm,
+        threshold: metadata.threshold,
+        preparedAt: new Date().toISOString(),
+      });
+
+      const quoteUrl = getQuoteUrl();
+      if (isInternalQuoteUrl(quoteUrl)) {
+        router.push("/offert");
+      } else {
+        window.open(quoteUrl, "_blank", "noopener,noreferrer");
+      }
+      setState((s) => ({
+        ...s,
+        isPreparingQuote: false,
+        exportNotice:
+          "PNG nedladdad. Fortsätt på offertsidan och bifoga filen i mejlet.",
+      }));
+    } catch {
+      setState((s) => ({
+        ...s,
+        isPreparingQuote: false,
         error: messageForError(new Error("EXPORT_FAIL")),
       }));
     }
@@ -350,64 +482,50 @@ export function GravyrApp() {
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      revoke(originalUrl);
-      revoke(processedUrl);
+      revoke(originalUrlRef.current);
+      revoke(processedUrlRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hasImage = Boolean(state.originalImage || state.foregroundImage);
-  const previewSrc =
-    state.viewMode === "original" ? originalUrl : processedUrl;
-  const previewAlt =
-    state.viewMode === "original"
-      ? "Originalbild"
-      : "Förhandsvisning av lasergravyr";
   const busy =
     state.isPreparing ||
     state.isProcessing ||
     state.isExporting ||
-    state.isExportingSvg;
+    state.isExportingSvg ||
+    state.isPreparingQuote;
+  const isSimple = state.settingsMode === "simple";
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:py-10">
-      <header className="space-y-2 text-center sm:text-left">
-        <p className="text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-          Lasergravyr
-        </p>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-          Gravyr-preview
-        </h1>
-        <p className="text-sm text-muted-foreground sm:text-base">
-          Ladda upp ett foto, se hur det blir som lasergravyr och ladda ner PNG
-          eller SVG till din offert.
-        </p>
-      </header>
-
       {!hasImage && !state.isPreparing && (
-        <div className="space-y-3">
-          <ImageUploader disabled={busy} onFile={handleFile} />
-          <RemoveBackgroundToggle
-            checked={state.removeBackgroundEnabled}
-            onCheckedChange={(v) => {
-              removeBgEnabledRef.current = v;
-              setState((s) => ({ ...s, removeBackgroundEnabled: v }));
-            }}
-            disabled={busy}
-          />
-        </div>
+        <ImageUploader disabled={busy} onFile={handleFile} />
       )}
 
       {(hasImage || state.isPreparing) && (
         <>
           <ImagePreview
-            src={state.isPreparing ? originalUrl : previewSrc}
-            alt={state.isPreparing ? "Uppladdad bild" : previewAlt}
+            src={state.isPreparing ? originalUrl : processedUrl}
+            alt={
+              state.isPreparing
+                ? "Uppladdad bild"
+                : "Förhandsvisning av lasergravyr"
+            }
             isProcessing={state.isPreparing || state.isProcessing}
+            footer={
+              hasImage ? (
+                <ThresholdSlider
+                  variant="glass"
+                  value={state.threshold}
+                  onChange={setThreshold}
+                  disabled={busy}
+                />
+              ) : null
+            }
           />
 
           {state.isPreparing && (
-            <p className="text-center text-sm text-muted-foreground">
+            <p className="text-center text-sm text-muted-foreground" aria-live="polite">
               {prepareLabel}
             </p>
           )}
@@ -415,10 +533,10 @@ export function GravyrApp() {
           {hasImage && (
             <div className="space-y-5 rounded-xl border border-border bg-card p-4 sm:p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <CompareToggle
-                  value={state.viewMode}
-                  onChange={(viewMode) =>
-                    setState((s) => ({ ...s, viewMode }))
+                <SettingsModeToggle
+                  value={state.settingsMode}
+                  onChange={(settingsMode) =>
+                    setState((s) => ({ ...s, settingsMode }))
                   }
                   disabled={busy}
                 />
@@ -427,48 +545,78 @@ export function GravyrApp() {
                   variant="ghost"
                   size="sm"
                   onClick={() => reset(true)}
-                  disabled={state.isExporting || state.isExportingSvg}
+                  disabled={
+                    state.isExporting ||
+                    state.isExportingSvg ||
+                    state.isPreparingQuote
+                  }
                 >
                   Välj ny bild
                 </Button>
               </div>
 
-              <RemoveBackgroundToggle
-                checked={state.removeBackgroundEnabled}
-                onCheckedChange={(v) => {
-                  void setRemoveBackgroundEnabled(v);
+              {isSimple ? (
+                <StylePicker
+                  algorithm={state.algorithm}
+                  threshold={state.threshold}
+                  onSelect={applyStyle}
+                  disabled={busy}
+                />
+              ) : (
+                <div className="space-y-4">
+                  <RemoveBackgroundToggle
+                    checked={state.removeBackgroundEnabled}
+                    onCheckedChange={(v) => {
+                      void setRemoveBackgroundEnabled(v);
+                    }}
+                    disabled={busy}
+                  />
+
+                  <NormalizeLevelsToggle
+                    checked={state.normalizeLevelsEnabled}
+                    onCheckedChange={setNormalizeLevelsEnabled}
+                    disabled={busy}
+                  />
+
+                  <DitherSelector
+                    value={state.algorithm}
+                    onChange={setAlgorithm}
+                    disabled={busy}
+                    label="Teknisk algoritm"
+                  />
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    <ExportButton
+                      onClick={handleExport}
+                      disabled={!state.foregroundImage || state.isPreparing}
+                      isExporting={state.isExporting}
+                    />
+                    <ExportSvgButton
+                      onClick={handleExportSvg}
+                      disabled={!state.foregroundImage || state.isPreparing}
+                      isExporting={state.isExportingSvg}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <QuoteButton
+                onClick={() => {
+                  void handleQuote();
                 }}
-                disabled={busy}
+                disabled={!state.foregroundImage || state.isPreparing}
+                isPreparing={state.isPreparingQuote}
               />
 
-              <DitherSelector
-                value={state.algorithm}
-                onChange={setAlgorithm}
-                disabled={busy}
-              />
-
-              <ThresholdSlider
-                value={state.threshold}
-                onChange={setThreshold}
-                disabled={busy}
-              />
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                <ExportButton
-                  onClick={handleExport}
-                  disabled={!state.foregroundImage || state.isPreparing}
-                  isExporting={state.isExporting}
-                />
-                <ExportSvgButton
-                  onClick={handleExportSvg}
-                  disabled={!state.foregroundImage || state.isPreparing}
-                  isExporting={state.isExportingSvg}
-                />
-                <QuoteButton
-                  href={getQuoteUrl()}
-                  disabled={!state.foregroundImage}
-                />
-              </div>
+              {state.exportNotice && (
+                <p
+                  className="text-sm text-muted-foreground"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {state.exportNotice}
+                </p>
+              )}
             </div>
           )}
         </>

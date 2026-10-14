@@ -17,17 +17,19 @@ type DitherSelectorProps = {
   value: DitherAlgorithm;
   onChange: (value: DitherAlgorithm) => void;
   disabled?: boolean;
+  label?: string;
 };
 
 export function DitherSelector({
   value,
   onChange,
   disabled,
+  label = "Algoritm",
 }: DitherSelectorProps) {
   return (
     <div className="space-y-2">
       <label htmlFor="dither-algorithm" className="text-sm font-medium">
-        Algoritm
+        {label}
       </label>
       <Select
         value={value}

@@ -9,6 +9,7 @@ import { sierraLiteDither } from "@/dithering/sierraLite";
 import { stuckiDither } from "@/dithering/stucki";
 import { thresholdDither } from "@/dithering/threshold";
 import { toGrayscale } from "@/image/grayscale";
+import { normalizeLevels } from "@/image/normalizeLevels";
 import { resizeImageData } from "@/image/resize";
 import { clampThreshold, type DitherAlgorithm } from "@/presets/default";
 
@@ -17,6 +18,8 @@ export type ProcessImageOptions = {
   threshold: number;
   /** Max sidlängd för preview. Utelämna/undefined = ingen nedskalning (export). */
   maxSize?: number;
+  /** Auto-levels före dither. Default false — behåller mjuka gradienter. */
+  normalize?: boolean;
 };
 
 export function processImage(
@@ -29,31 +32,33 @@ export function processImage(
       ? resizeImageData(source, options.maxSize)
       : source;
   const gray = toGrayscale(resized);
+  const prepared =
+    options.normalize === true ? normalizeLevels(gray) : gray;
 
   switch (options.algorithm) {
     case "jarvis":
-      return jarvisDither(gray, threshold);
+      return jarvisDither(prepared, threshold);
     case "atkinson":
-      return atkinsonDither(gray, threshold);
+      return atkinsonDither(prepared, threshold);
     case "floydSteinberg":
-      return floydSteinbergDither(gray, threshold);
+      return floydSteinbergDither(prepared, threshold);
     case "stucki":
-      return stuckiDither(gray, threshold);
+      return stuckiDither(prepared, threshold);
     case "sierraLite":
-      return sierraLiteDither(gray, threshold);
+      return sierraLiteDither(prepared, threshold);
     case "bayer4":
-      return bayer4Dither(gray, threshold);
+      return bayer4Dither(prepared, threshold);
     case "bayer8":
-      return bayer8Dither(gray, threshold);
+      return bayer8Dither(prepared, threshold);
     case "blueNoise":
-      return blueNoiseDither(gray, threshold);
+      return blueNoiseDither(prepared, threshold);
     case "halftone":
-      return halftoneDither(gray, threshold);
+      return halftoneDither(prepared, threshold);
     case "randomThreshold":
-      return randomThresholdDither(gray, threshold);
+      return randomThresholdDither(prepared, threshold);
     case "threshold":
-      return thresholdDither(gray, threshold);
+      return thresholdDither(prepared, threshold);
     default:
-      return jarvisDither(gray, threshold);
+      return jarvisDither(prepared, threshold);
   }
 }

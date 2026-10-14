@@ -1,8 +1,8 @@
 # Gravyr-preview
 
-Mobilanpassad webbapp för lasergravyr-förhandsvisning. Kunden laddar upp ett foto, kan valfritt ta bort bakgrund, och ser resultatet live med valbar dither-algoritm (Jarvis, Atkinson, Floyd–Steinberg, Stucki, Sierra Lite, Bayer, Blue Noise, Halftone m.fl.). PNG och SVG exporteras till offert.
+Mobilanpassad webbapp för lasergravyr-förhandsvisning. Kunden laddar upp ett foto, väljer en enkel gravyrstil och skickar bilden för offert. Avancerade algoritmer, bakgrundsborttagning och PNG/SVG-export finns under **Avancerade inställningar**.
 
-All bildbehandling körs lokalt i webbläsaren. Pixlar lämnar inte enheten.
+All bildbehandling körs lokalt i webbläsaren. Pixlar lämnar inte enheten (utom när kunden själv mejlar den nedladdade filen).
 
 ## Kom igång
 
@@ -13,40 +13,42 @@ npm run dev
 
 Öppna [http://127.0.0.1:43127](http://127.0.0.1:43127).
 
-Bygg för produktion:
-
 ```bash
 npm run build
 npm run start
+npm test
 ```
 
 ## Miljövariabler
 
-Skapa `.env.local` vid behov:
+Skapa `.env.local`:
 
 ```bash
-# Länk för "Be om offert"-knappen (default: /offert)
+# Offertknappens mål (default: /offert)
 NEXT_PUBLIC_QUOTE_URL=/offert
-```
 
-Sätt `NEXT_PUBLIC_QUOTE_URL` till din riktiga offert-/kontakt-URL. I v1 bifogar kunden den nedladdade PNG:en manuellt i formuläret.
+# Mottagare för mailto-formuläret på /offert
+NEXT_PUBLIC_QUOTE_EMAIL=din@epost.se
+```
 
 ## Flöde
 
-1. Ladda upp JPG/PNG/WebP
-2. Valfritt: kryssa i **Ta bort bakgrund** (av som default). Då körs `@imgly/background-removal` en gång per bild och resultatet cacheas; av = originalbilden används utan modell
-3. Vid BG-removal beskärs motivet + padding; utan BG körs grayscale/dither på hela originalet
-4. Live preview: Rec.709-grayscale + vald algoritm via dropdown (max 1200×1200); tröskel **20–55** (default 50)
-5. Exportera PNG eller SVG i full pipeline-upplösning (ingen preview-cap, ingen size-kontroll / uppskalning)
-6. Filnamn: `gravyr-{algorithm}-threshold-{n}.png` / `.svg`
-7. Metadata `{ algorithm, threshold, version: "1.0" }` i PNG tEXt respektive SVG-kommentar/`data-*`
-8. SVG: svarta dither-pixlar som run-length-`<rect>` (vektoriserad bitmap, alltid högsta upplösning)
+1. Ladda upp JPG/PNG/WebP (max 25 MB)
+2. Välj gravyrstil: **Klassisk**, **Abstrakt**, **Grynig** eller **Halftone**
+3. Tryck **Skicka för gravyr** — PNG laddas ner och offertsidan öppnas
+4. Fyll i formuläret och bifoga PNG:en i mejlet
+5. Under **Avancerade inställningar**: ta bort bakgrund, teknisk algoritm, tröskel, ladda ner PNG/SVG
 
-## Byta offert-URL
+### Teknik
 
-- Lokalt: `.env.local` → `NEXT_PUBLIC_QUOTE_URL=https://…` och starta om dev-servern
-- Vercel: sätt samma variabel under Project → Settings → Environment Variables (Preview + Production) och redeploy (`NEXT_PUBLIC_*` bakas in vid build)
-- Default om variabeln saknas: `/offert`
+- Preview: Rec.709-grayscale + auto-levels + dither via Web Worker (max 1200 px)
+- Export: samma pipeline i full upplösning via worker
+- SVG: svarta run-length-`<rect>`, storlek i **mm** (default 254 DPI), ingen vit bakgrund
+- Metadata i PNG tEXt / SVG-kommentar
+
+## Manuell bildkontroll
+
+Se [docs/IMAGE_TEST_CHECKLIST.md](docs/IMAGE_TEST_CHECKLIST.md).
 
 ## Iframe
 
@@ -60,24 +62,9 @@ Sätt `NEXT_PUBLIC_QUOTE_URL` till din riktiga offert-/kontakt-URL. I v1 bifogar
 ></iframe>
 ```
 
-## Bakgrundsmodell
-
-Modellen körs bara när **Ta bort bakgrund** är ikryssad. Första gången hämtas den från CDN (`@imgly/background-removal`) och resultatet cacheas per uppladdad bild. Avmarkera = tillbaka till originalpipeline utan transparent mask. Algoritm/tröskel kör om endast dithering.
-
 ## Stack
 
 - Next.js App Router, TypeScript, Tailwind CSS, shadcn/ui
 - Web Worker för `processImage`
-- Utbytbart `removeBackground`-interface (imgly-adapter i v1)
-
-## Projektstruktur
-
-```
-src/
-  components/   UI (uploader, preview, tabs, slider, export, offert)
-  image/        load, crop, grayscale, resize, processImage, BG-adapter
-  dithering/    jarvis, atkinson, floydSteinberg, stucki, sierraLite, bayer, blueNoise, halftone, randomThreshold, threshold
-  export/       PNG/SVG + metadata
-  workers/      processImage.worker.ts
-  presets/      defaults
-```
+- Vitest för enhetstester
+- Utbytbart `removeBackground`-interface (`@imgly/background-removal`)

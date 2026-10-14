@@ -17,6 +17,7 @@ export function ExportButton({
   return (
     <Button
       type="button"
+      variant="outline"
       size="lg"
       className="w-full sm:w-auto"
       onClick={onClick}

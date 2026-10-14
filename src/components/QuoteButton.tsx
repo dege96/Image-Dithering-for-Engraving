@@ -1,34 +1,29 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type QuoteButtonProps = {
-  href: string;
+  onClick: () => void;
   disabled?: boolean;
+  isPreparing?: boolean;
 };
 
-export function QuoteButton({ href, disabled }: QuoteButtonProps) {
+export function QuoteButton({
+  onClick,
+  disabled,
+  isPreparing,
+}: QuoteButtonProps) {
   return (
     <Button
       type="button"
-      variant="outline"
       size="lg"
       className="w-full sm:w-auto"
-      disabled={disabled}
-      asChild={!disabled}
+      disabled={disabled || isPreparing}
+      onClick={onClick}
     >
-      {disabled ? (
-        <span>
-          <ExternalLink data-icon="inline-start" />
-          Be om offert
-        </span>
-      ) : (
-        <a href={href} target="_blank" rel="noopener noreferrer">
-          <ExternalLink data-icon="inline-start" />
-          Be om offert
-        </a>
-      )}
+      <Send data-icon="inline-start" />
+      {isPreparing ? "Förbereder…" : "Skicka för gravyr"}
     </Button>
   );
 }
