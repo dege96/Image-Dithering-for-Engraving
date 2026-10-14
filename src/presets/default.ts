@@ -24,6 +24,26 @@ export const CROP_PADDING = 12;
 export const SLIDER_DEBOUNCE_MS = 75;
 export const APP_VERSION = "1.0";
 
+/** Kontrast före dither (1 = oförändrad). */
+export const MIN_CONTRAST = 0.5;
+export const MAX_CONTRAST = 2;
+export const DEFAULT_CONTRAST = 1;
+
+/** Gamma före dither (1 = oförändrad). */
+export const MIN_GAMMA = 0.5;
+export const MAX_GAMMA = 2;
+export const DEFAULT_GAMMA = 1;
+
+/** Halftone cellstorlek-skala (1 = auto longest/150). Lägre = finare. */
+export const MIN_HALFTONE_CELL_SCALE = 0.5;
+export const MAX_HALFTONE_CELL_SCALE = 2.5;
+export const DEFAULT_HALFTONE_CELL_SCALE = 1;
+
+/** Random-threshold brusamplitud (±). */
+export const MIN_NOISE_AMPLITUDE = 0;
+export const MAX_NOISE_AMPLITUDE = 64;
+export const DEFAULT_NOISE_AMPLITUDE = 32;
+
 /** DPI för SVG-export (pixlar → mm). 254 = 10 px/mm. */
 export const EXPORT_DPI = 254;
 
@@ -97,6 +117,44 @@ export const ADVANCED_ONLY_ALGORITHMS: readonly DitherAlgorithm[] =
 export function clampThreshold(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_THRESHOLD;
   return Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, Math.round(value)));
+}
+
+function clampFloat(
+  value: number,
+  min: number,
+  max: number,
+  fallback: number,
+  decimals = 2,
+): number {
+  if (!Number.isFinite(value)) return fallback;
+  const factor = 10 ** decimals;
+  const rounded = Math.round(value * factor) / factor;
+  return Math.min(max, Math.max(min, rounded));
+}
+
+export function clampContrast(value: number): number {
+  return clampFloat(value, MIN_CONTRAST, MAX_CONTRAST, DEFAULT_CONTRAST);
+}
+
+export function clampGamma(value: number): number {
+  return clampFloat(value, MIN_GAMMA, MAX_GAMMA, DEFAULT_GAMMA);
+}
+
+export function clampHalftoneCellScale(value: number): number {
+  return clampFloat(
+    value,
+    MIN_HALFTONE_CELL_SCALE,
+    MAX_HALFTONE_CELL_SCALE,
+    DEFAULT_HALFTONE_CELL_SCALE,
+  );
+}
+
+export function clampNoiseAmplitude(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_NOISE_AMPLITUDE;
+  return Math.min(
+    MAX_NOISE_AMPLITUDE,
+    Math.max(MIN_NOISE_AMPLITUDE, Math.round(value)),
+  );
 }
 
 export function customerStyleForPreset(

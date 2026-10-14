@@ -2,19 +2,26 @@
  * Cirkulär halftone: cellbaserade prickar vars radie styrs av luminans.
  * Cellstorlek skalas med bildens längsta sida så preview och export
  * får liknande pricktäthet (mål ~150 celler över längsta sidan).
+ * `cellScale` (default 1): lägre = finare, högre = grövre.
  */
 
-function cellSizeForImage(width: number, height: number): number {
+function cellSizeForImage(
+  width: number,
+  height: number,
+  cellScale = 1,
+): number {
   const longest = Math.max(width, height);
-  return Math.max(4, Math.round(longest / 150));
+  const base = Math.max(4, Math.round(longest / 150));
+  return Math.max(2, Math.round(base * cellScale));
 }
 
 export function halftoneDither(
   imageData: ImageData,
   threshold: number,
+  cellScale = 1,
 ): ImageData {
   const { width, height, data } = imageData;
-  const cell = cellSizeForImage(width, height);
+  const cell = cellSizeForImage(width, height, cellScale);
   const out = new ImageData(width, height);
   out.data.fill(255);
   for (let i = 3; i < out.data.length; i += 4) {

@@ -1,6 +1,6 @@
 /**
  * Random threshold — deterministiskt brus per pixel (ingen seed-UI).
- * Tröskeln styr mittpunkten; brusamplituden är ±32.
+ * Tröskeln styr mittpunkten; `noiseAmplitude` styr brusstyrka (±, default 32).
  */
 
 function hashNoise(x: number, y: number): number {
@@ -13,11 +13,12 @@ function hashNoise(x: number, y: number): number {
 export function randomThresholdDither(
   imageData: ImageData,
   threshold: number,
+  noiseAmplitude = 32,
 ): ImageData {
   const { width, height, data } = imageData;
   const out = new ImageData(width, height);
   const t = (threshold / 100) * 255;
-  const amplitude = 32;
+  const amplitude = Math.max(0, noiseAmplitude);
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {

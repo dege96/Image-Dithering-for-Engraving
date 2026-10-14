@@ -4,7 +4,10 @@ import {
   type DitherAlgorithm,
 } from "@/presets/default";
 import { processImageAsync } from "@/image/processImageClient";
-import type { ExportMetadata } from "@/export/exportPNG";
+import type {
+  ExportMetadata,
+  ExportProcessOptions,
+} from "@/export/exportPNG";
 import { downloadBlob } from "@/export/exportPNG";
 import {
   buildSvgFilename,
@@ -22,13 +25,17 @@ export async function exportSVG(
   foregroundImage: ImageData,
   algorithm: DitherAlgorithm,
   threshold: number,
-  options?: SvgExportOptions & { normalize?: boolean },
+  options?: SvgExportOptions & ExportProcessOptions,
 ): Promise<{ blob: Blob; filename: string; metadata: ExportMetadata }> {
   const clamped = clampThreshold(threshold);
   const processed = await processImageAsync(foregroundImage, {
     algorithm,
     threshold: clamped,
     normalize: options?.normalize,
+    contrast: options?.contrast,
+    gamma: options?.gamma,
+    halftoneCellScale: options?.halftoneCellScale,
+    noiseAmplitude: options?.noiseAmplitude,
   });
 
   const metadata: ExportMetadata = {

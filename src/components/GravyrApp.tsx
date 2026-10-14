@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { DitherSelector } from "@/components/DitherSelector";
 import { ExportButton } from "@/components/ExportButton";
 import { ExportSvgButton } from "@/components/ExportSvgButton";
+import { GrainSlider } from "@/components/GrainSlider";
+import { HalftoneDensitySlider } from "@/components/HalftoneDensitySlider";
 import { ImagePreview } from "@/components/ImagePreview";
 import { ImageUploader } from "@/components/ImageUploader";
 import { QuoteButton } from "@/components/QuoteButton";
@@ -13,6 +15,7 @@ import { RemoveBackgroundToggle } from "@/components/RemoveBackgroundToggle";
 import { SettingsModeToggle } from "@/components/SettingsModeToggle";
 import { StylePicker } from "@/components/StylePicker";
 import { ThresholdSlider } from "@/components/ThresholdSlider";
+import { ToneControls } from "@/components/ToneControls";
 import { Button } from "@/components/ui/button";
 import { downloadBlob, exportPNG } from "@/export/exportPNG";
 import { exportSVG } from "@/export/exportSVG";
@@ -33,10 +36,18 @@ import {
 import {
   CUSTOMER_STYLES,
   DEFAULT_ALGORITHM,
+  DEFAULT_CONTRAST,
+  DEFAULT_GAMMA,
+  DEFAULT_HALFTONE_CELL_SCALE,
+  DEFAULT_NOISE_AMPLITUDE,
   DEFAULT_THRESHOLD,
   EXPORT_DPI,
   PREVIEW_MAX_SIZE,
   SLIDER_DEBOUNCE_MS,
+  clampContrast,
+  clampGamma,
+  clampHalftoneCellScale,
+  clampNoiseAmplitude,
   clampThreshold,
   exportSizeMm,
   type CustomerStyle,
@@ -50,6 +61,10 @@ type AppState = {
   foregroundImage: ImageData | null;
   algorithm: DitherAlgorithm;
   threshold: number;
+  contrast: number;
+  gamma: number;
+  halftoneCellScale: number;
+  noiseAmplitude: number;
   removeBackgroundEnabled: boolean;
   normalizeLevelsEnabled: boolean;
   isPreparing: boolean;
@@ -68,6 +83,10 @@ const initialState: AppState = {
   foregroundImage: null,
   algorithm: DEFAULT_ALGORITHM,
   threshold: DEFAULT_THRESHOLD,
+  contrast: DEFAULT_CONTRAST,
+  gamma: DEFAULT_GAMMA,
+  halftoneCellScale: DEFAULT_HALFTONE_CELL_SCALE,
+  noiseAmplitude: DEFAULT_NOISE_AMPLITUDE,
   removeBackgroundEnabled: false,
   normalizeLevelsEnabled: false,
   isPreparing: false,
@@ -96,12 +115,28 @@ export function GravyrApp() {
   const algorithmRef = useRef(state.algorithm);
   const thresholdRef = useRef(state.threshold);
   const normalizeRef = useRef(state.normalizeLevelsEnabled);
+  const contrastRef = useRef(state.contrast);
+  const gammaRef = useRef(state.gamma);
+  const halftoneCellScaleRef = useRef(state.halftoneCellScale);
+  const noiseAmplitudeRef = useRef(state.noiseAmplitude);
   const foregroundRef = useRef<ImageData | null>(null);
 
   algorithmRef.current = state.algorithm;
   thresholdRef.current = state.threshold;
   normalizeRef.current = state.normalizeLevelsEnabled;
+  contrastRef.current = state.contrast;
+  gammaRef.current = state.gamma;
+  halftoneCellScaleRef.current = state.halftoneCellScale;
+  noiseAmplitudeRef.current = state.noiseAmplitude;
   foregroundRef.current = state.foregroundImage;
+
+  const processExtras = () => ({
+    normalize: normalizeRef.current,
+    contrast: contrastRef.current,
+    gamma: gammaRef.current,
+    halftoneCellScale: halftoneCellScaleRef.current,
+    noiseAmplitude: noiseAmplitudeRef.current,
+  });
 
   const revoke = (url: string | null) => {
     if (url) URL.revokeObjectURL(url);
@@ -142,7 +177,7 @@ export function GravyrApp() {
       foreground: ImageData,
       algorithm: DitherAlgorithm,
       threshold: number,
-      normalize = normalizeRef.current,
+      extras = processExtras(),
     ) => {
       const id = ++requestId.current;
       const clamped = clampThreshold(threshold);
@@ -152,7 +187,7 @@ export function GravyrApp() {
           algorithm,
           threshold: clamped,
           maxSize: PREVIEW_MAX_SIZE,
-          normalize,
+          ...extras,
         });
         if (id !== requestId.current) return;
         const url = await imageDataToObjectUrl(result);
@@ -183,15 +218,15 @@ export function GravyrApp() {
       algorithm: DitherAlgorithm,
       threshold: number,
       immediate = false,
-      normalize = normalizeRef.current,
+      extras = processExtras(),
     ) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (immediate) {
-        void runProcess(foreground, algorithm, threshold, normalize);
+        void runProcess(foreground, algorithm, threshold, extras);
         return;
       }
       debounceRef.current = setTimeout(() => {
-        void runProcess(foreground, algorithm, threshold, normalize);
+        void runProcess(foreground, algorithm, threshold, extras);
       }, SLIDER_DEBOUNCE_MS);
     },
     [runProcess],
@@ -366,13 +401,50 @@ export function GravyrApp() {
     setState((s) => ({ ...s, normalizeLevelsEnabled: enabled }));
     const foreground = foregroundRef.current;
     if (foreground) {
-      scheduleProcess(
-        foreground,
-        algorithmRef.current,
-        thresholdRef.current,
-        true,
-        enabled,
-      );
+      scheduleProcess(foreground, algorithmRef.current, thresholdRef.current, true, {
+        ...processExtras(),
+        normalize: enabled,
+      });
+    }
+  };
+
+  const setContrast = (contrast: number) => {
+    const clamped = clampContrast(contrast);
+    contrastRef.current = clamped;
+    setState((s) => ({ ...s, contrast: clamped }));
+    const foreground = foregroundRef.current;
+    if (foreground) {
+      scheduleProcess(foreground, algorithmRef.current, thresholdRef.current);
+    }
+  };
+
+  const setGamma = (gamma: number) => {
+    const clamped = clampGamma(gamma);
+    gammaRef.current = clamped;
+    setState((s) => ({ ...s, gamma: clamped }));
+    const foreground = foregroundRef.current;
+    if (foreground) {
+      scheduleProcess(foreground, algorithmRef.current, thresholdRef.current);
+    }
+  };
+
+  const setHalftoneCellScale = (halftoneCellScale: number) => {
+    const clamped = clampHalftoneCellScale(halftoneCellScale);
+    halftoneCellScaleRef.current = clamped;
+    setState((s) => ({ ...s, halftoneCellScale: clamped }));
+    const foreground = foregroundRef.current;
+    if (foreground) {
+      scheduleProcess(foreground, algorithmRef.current, thresholdRef.current);
+    }
+  };
+
+  const setNoiseAmplitude = (noiseAmplitude: number) => {
+    const clamped = clampNoiseAmplitude(noiseAmplitude);
+    noiseAmplitudeRef.current = clamped;
+    setState((s) => ({ ...s, noiseAmplitude: clamped }));
+    const foreground = foregroundRef.current;
+    if (foreground) {
+      scheduleProcess(foreground, algorithmRef.current, thresholdRef.current);
     }
   };
 
@@ -384,7 +456,13 @@ export function GravyrApp() {
         state.foregroundImage,
         state.algorithm,
         state.threshold,
-        { normalize: state.normalizeLevelsEnabled },
+        {
+          normalize: state.normalizeLevelsEnabled,
+          contrast: state.contrast,
+          gamma: state.gamma,
+          halftoneCellScale: state.halftoneCellScale,
+          noiseAmplitude: state.noiseAmplitude,
+        },
       );
       downloadBlob(blob, filename);
       setState((s) => ({
@@ -414,7 +492,13 @@ export function GravyrApp() {
         state.foregroundImage,
         state.algorithm,
         state.threshold,
-        { normalize: state.normalizeLevelsEnabled },
+        {
+          normalize: state.normalizeLevelsEnabled,
+          contrast: state.contrast,
+          gamma: state.gamma,
+          halftoneCellScale: state.halftoneCellScale,
+          noiseAmplitude: state.noiseAmplitude,
+        },
       );
       downloadBlob(blob, filename);
       const size = exportSizeMm(
@@ -448,7 +532,13 @@ export function GravyrApp() {
         state.foregroundImage,
         state.algorithm,
         state.threshold,
-        { normalize: state.normalizeLevelsEnabled },
+        {
+          normalize: state.normalizeLevelsEnabled,
+          contrast: state.contrast,
+          gamma: state.gamma,
+          halftoneCellScale: state.halftoneCellScale,
+          noiseAmplitude: state.noiseAmplitude,
+        },
       );
       downloadBlob(blob, filename);
       saveQuoteSession({
@@ -584,6 +674,30 @@ export function GravyrApp() {
                     disabled={busy}
                     label="Teknisk algoritm"
                   />
+
+                  <ToneControls
+                    contrast={state.contrast}
+                    gamma={state.gamma}
+                    onContrastChange={setContrast}
+                    onGammaChange={setGamma}
+                    disabled={busy}
+                  />
+
+                  {state.algorithm === "halftone" && (
+                    <HalftoneDensitySlider
+                      value={state.halftoneCellScale}
+                      onChange={setHalftoneCellScale}
+                      disabled={busy}
+                    />
+                  )}
+
+                  {state.algorithm === "randomThreshold" && (
+                    <GrainSlider
+                      value={state.noiseAmplitude}
+                      onChange={setNoiseAmplitude}
+                      disabled={busy}
+                    />
+                  )}
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                     <ExportButton

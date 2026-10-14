@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   EXPORT_DPI,
+  clampContrast,
+  clampGamma,
+  clampHalftoneCellScale,
+  clampNoiseAmplitude,
   clampThreshold,
   exportSizeMm,
   pixelsToMm,
@@ -36,5 +40,20 @@ describe("exportSizeMm", () => {
 describe("pixelsToMm", () => {
   it("matches 254 DPI = 10 px/mm", () => {
     expect(pixelsToMm(10, 254)).toBeCloseTo(1, 5);
+  });
+});
+
+describe("advanced param clamps", () => {
+  it("clamps contrast and gamma", () => {
+    expect(clampContrast(0.1)).toBe(0.5);
+    expect(clampContrast(1.23)).toBe(1.23);
+    expect(clampGamma(3)).toBe(2);
+  });
+
+  it("clamps halftone scale and noise amplitude", () => {
+    expect(clampHalftoneCellScale(0.1)).toBe(0.5);
+    expect(clampHalftoneCellScale(2)).toBe(2);
+    expect(clampNoiseAmplitude(-5)).toBe(0);
+    expect(clampNoiseAmplitude(99)).toBe(64);
   });
 });

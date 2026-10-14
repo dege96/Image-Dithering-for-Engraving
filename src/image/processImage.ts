@@ -11,7 +11,19 @@ import { thresholdDither } from "@/dithering/threshold";
 import { toGrayscale } from "@/image/grayscale";
 import { normalizeLevels } from "@/image/normalizeLevels";
 import { resizeImageData } from "@/image/resize";
-import { clampThreshold, type DitherAlgorithm } from "@/presets/default";
+import { adjustTone } from "@/image/toneAdjust";
+import {
+  clampContrast,
+  clampGamma,
+  clampHalftoneCellScale,
+  clampNoiseAmplitude,
+  clampThreshold,
+  DEFAULT_CONTRAST,
+  DEFAULT_GAMMA,
+  DEFAULT_HALFTONE_CELL_SCALE,
+  DEFAULT_NOISE_AMPLITUDE,
+  type DitherAlgorithm,
+} from "@/presets/default";
 
 export type ProcessImageOptions = {
   algorithm: DitherAlgorithm;
@@ -20,6 +32,14 @@ export type ProcessImageOptions = {
   maxSize?: number;
   /** Auto-levels före dither. Default false — behåller mjuka gradienter. */
   normalize?: boolean;
+  /** Kontrast före dither. Default 1. */
+  contrast?: number;
+  /** Gamma före dither. Default 1. */
+  gamma?: number;
+  /** Halftone cellstorlek-skala. Default 1 (auto). */
+  halftoneCellScale?: number;
+  /** Random-threshold brusamplitud. Default 32. */
+  noiseAmplitude?: number;
 };
 
 export function processImage(
@@ -27,13 +47,23 @@ export function processImage(
   options: ProcessImageOptions,
 ): ImageData {
   const threshold = clampThreshold(options.threshold);
+  const contrast = clampContrast(options.contrast ?? DEFAULT_CONTRAST);
+  const gamma = clampGamma(options.gamma ?? DEFAULT_GAMMA);
+  const halftoneCellScale = clampHalftoneCellScale(
+    options.halftoneCellScale ?? DEFAULT_HALFTONE_CELL_SCALE,
+  );
+  const noiseAmplitude = clampNoiseAmplitude(
+    options.noiseAmplitude ?? DEFAULT_NOISE_AMPLITUDE,
+  );
+
   const resized =
     options.maxSize != null
       ? resizeImageData(source, options.maxSize)
       : source;
   const gray = toGrayscale(resized);
-  const prepared =
+  const leveled =
     options.normalize === true ? normalizeLevels(gray) : gray;
+  const prepared = adjustTone(leveled, contrast, gamma);
 
   switch (options.algorithm) {
     case "jarvis":
@@ -53,9 +83,9 @@ export function processImage(
     case "blueNoise":
       return blueNoiseDither(prepared, threshold);
     case "halftone":
-      return halftoneDither(prepared, threshold);
+      return halftoneDither(prepared, threshold, halftoneCellScale);
     case "randomThreshold":
-      return randomThresholdDither(prepared, threshold);
+      return randomThresholdDither(prepared, threshold, noiseAmplitude);
     case "threshold":
       return thresholdDither(prepared, threshold);
     default:

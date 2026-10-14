@@ -60,17 +60,29 @@ async function encodePngWithMetadata(
 /**
  * Exporterar gravyr-PNG i full beskuren upplösning via Web Worker när möjligt.
  */
+export type ExportProcessOptions = {
+  normalize?: boolean;
+  contrast?: number;
+  gamma?: number;
+  halftoneCellScale?: number;
+  noiseAmplitude?: number;
+};
+
 export async function exportPNG(
   foregroundImage: ImageData,
   algorithm: DitherAlgorithm,
   threshold: number,
-  options?: { normalize?: boolean },
+  options?: ExportProcessOptions,
 ): Promise<{ blob: Blob; filename: string; metadata: ExportMetadata }> {
   const clamped = clampThreshold(threshold);
   const processed = await processImageAsync(foregroundImage, {
     algorithm,
     threshold: clamped,
     normalize: options?.normalize,
+    contrast: options?.contrast,
+    gamma: options?.gamma,
+    halftoneCellScale: options?.halftoneCellScale,
+    noiseAmplitude: options?.noiseAmplitude,
   });
 
   const metadata: ExportMetadata = {
