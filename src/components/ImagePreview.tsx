@@ -33,7 +33,7 @@ export function ImagePreview({
         <p className="text-sm text-muted-foreground">Ingen förhandsvisning ännu</p>
       )}
       {isProcessing && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-[1px]">
+        <div className="absolute inset-0 flex items-center justify-center bg-background/70 backdrop-blur-[1px]">
           <div className="flex flex-col items-center gap-2 px-4 text-center">
             <div className="size-8 animate-spin rounded-full border-2 border-foreground/20 border-t-foreground" />
             <p className="text-sm font-medium text-foreground">
