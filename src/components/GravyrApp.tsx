@@ -27,6 +27,7 @@ import {
   DEFAULT_THRESHOLD,
   PREVIEW_MAX_SIZE,
   SLIDER_DEBOUNCE_MS,
+  clampThreshold,
   type DitherAlgorithm,
   type ViewMode,
 } from "@/presets/default";
@@ -108,11 +109,12 @@ export function GravyrApp() {
       threshold: number,
     ) => {
       const id = ++requestId.current;
+      const clamped = clampThreshold(threshold);
       setState((s) => ({ ...s, isProcessing: true, error: null }));
       try {
         const result = await processImageAsync(foreground, {
           algorithm,
-          threshold,
+          threshold: clamped,
           maxSize: PREVIEW_MAX_SIZE,
         });
         if (id !== requestId.current) return;
@@ -298,9 +300,10 @@ export function GravyrApp() {
   };
 
   const setThreshold = (threshold: number) => {
-    setState((s) => ({ ...s, threshold }));
+    const clamped = clampThreshold(threshold);
+    setState((s) => ({ ...s, threshold: clamped }));
     if (state.foregroundImage) {
-      scheduleProcess(state.foregroundImage, state.algorithm, threshold);
+      scheduleProcess(state.foregroundImage, state.algorithm, clamped);
     }
   };
 

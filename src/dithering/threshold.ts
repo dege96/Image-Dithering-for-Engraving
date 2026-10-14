@@ -1,6 +1,6 @@
 /**
  * Enkel tröskel: pixlar under threshold → svart, annars vit.
- * threshold är 0–100 (mappas till 0–255).
+ * threshold anges 0–100 (UI clamp 20–55) och mappas till 0–255.
  */
 export function thresholdDither(
   imageData: ImageData,

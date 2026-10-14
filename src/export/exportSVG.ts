@@ -1,4 +1,8 @@
-import { APP_VERSION, type DitherAlgorithm } from "@/presets/default";
+import {
+  APP_VERSION,
+  clampThreshold,
+  type DitherAlgorithm,
+} from "@/presets/default";
 import { processImage } from "@/image/processImage";
 import type { ExportMetadata } from "@/export/exportPNG";
 import { downloadBlob } from "@/export/exportPNG";
@@ -66,15 +70,16 @@ export async function exportSVG(
   algorithm: DitherAlgorithm,
   threshold: number,
 ): Promise<{ blob: Blob; filename: string; metadata: ExportMetadata }> {
+  const clamped = clampThreshold(threshold);
   const processed = processImage(foregroundImage, {
     algorithm,
-    threshold,
+    threshold: clamped,
     // ingen maxSize → högsta bit-rate / full export-upplösning
   });
 
   const metadata: ExportMetadata = {
     algorithm,
-    threshold,
+    threshold: clamped,
     version: APP_VERSION,
   };
 
@@ -82,7 +87,7 @@ export async function exportSVG(
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   return {
     blob,
-    filename: buildSvgFilename(algorithm, threshold),
+    filename: buildSvgFilename(algorithm, clamped),
     metadata,
   };
 }

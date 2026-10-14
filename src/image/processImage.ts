@@ -3,7 +3,7 @@ import { jarvisDither } from "@/dithering/jarvis";
 import { thresholdDither } from "@/dithering/threshold";
 import { toGrayscale } from "@/image/grayscale";
 import { resizeImageData } from "@/image/resize";
-import type { DitherAlgorithm } from "@/presets/default";
+import { clampThreshold, type DitherAlgorithm } from "@/presets/default";
 
 export type ProcessImageOptions = {
   algorithm: DitherAlgorithm;
@@ -16,6 +16,7 @@ export function processImage(
   source: ImageData,
   options: ProcessImageOptions,
 ): ImageData {
+  const threshold = clampThreshold(options.threshold);
   const resized =
     options.maxSize != null
       ? resizeImageData(source, options.maxSize)
@@ -24,12 +25,12 @@ export function processImage(
 
   switch (options.algorithm) {
     case "jarvis":
-      return jarvisDither(gray, options.threshold);
+      return jarvisDither(gray, threshold);
     case "atkinson":
-      return atkinsonDither(gray, options.threshold);
+      return atkinsonDither(gray, threshold);
     case "threshold":
-      return thresholdDither(gray, options.threshold);
+      return thresholdDither(gray, threshold);
     default:
-      return jarvisDither(gray, options.threshold);
+      return jarvisDither(gray, threshold);
   }
 }
