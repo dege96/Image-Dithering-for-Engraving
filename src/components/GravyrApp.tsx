@@ -9,10 +9,11 @@ import { GrainSlider } from "@/components/GrainSlider";
 import { HalftoneDensitySlider } from "@/components/HalftoneDensitySlider";
 import { ImagePreview } from "@/components/ImagePreview";
 import { ImageUploader } from "@/components/ImageUploader";
-import { QuoteButton } from "@/components/QuoteButton";
 import { NormalizeLevelsToggle } from "@/components/NormalizeLevelsToggle";
-import { RemoveBackgroundToggle } from "@/components/RemoveBackgroundToggle";
+import { PrepareImageDialog } from "@/components/PrepareImageDialog";
+import { QuoteButton } from "@/components/QuoteButton";
 import { SettingsModeToggle } from "@/components/SettingsModeToggle";
+import { SizeMmControl } from "@/components/SizeMmControl";
 import { StylePicker } from "@/components/StylePicker";
 import { ThresholdSlider } from "@/components/ThresholdSlider";
 import { ToneControls } from "@/components/ToneControls";
@@ -41,23 +42,28 @@ import {
   DEFAULT_HALFTONE_CELL_SCALE,
   DEFAULT_NOISE_AMPLITUDE,
   DEFAULT_THRESHOLD,
-  EXPORT_DPI,
-  PREVIEW_MAX_SIZE,
   SLIDER_DEBOUNCE_MS,
   clampContrast,
   clampGamma,
   clampHalftoneCellScale,
   clampNoiseAmplitude,
   clampThreshold,
-  exportSizeMm,
   type CustomerStyle,
+  type CustomerStyleId,
   type DitherAlgorithm,
   type SettingsMode,
 } from "@/presets/default";
+import { DEFAULT_ENGRAVING_PROFILE } from "@/presets/engravingProfile";
+
+const PROFILE = DEFAULT_ENGRAVING_PROFILE;
+
+type AppPhase = "idle" | "prepare" | "ready";
 
 type AppState = {
+  phase: AppPhase;
   originalImage: ImageData | null;
   bgRemovedImage: ImageData | null;
+  /** Oditherad källa efter prepare (cache). */
   foregroundImage: ImageData | null;
   algorithm: DitherAlgorithm;
   threshold: number;
@@ -67,6 +73,10 @@ type AppState = {
   noiseAmplitude: number;
   removeBackgroundEnabled: boolean;
   normalizeLevelsEnabled: boolean;
+  skipDither: boolean;
+  widthMm: number;
+  activeStyleId: CustomerStyleId | null;
+  prepareNote: string | null;
   isPreparing: boolean;
   isProcessing: boolean;
   isExporting: boolean;
@@ -78,6 +88,7 @@ type AppState = {
 };
 
 const initialState: AppState = {
+  phase: "idle",
   originalImage: null,
   bgRemovedImage: null,
   foregroundImage: null,
@@ -89,6 +100,10 @@ const initialState: AppState = {
   noiseAmplitude: DEFAULT_NOISE_AMPLITUDE,
   removeBackgroundEnabled: false,
   normalizeLevelsEnabled: false,
+  skipDither: false,
+  widthMm: PROFILE.physical.defaultWidthMm,
+  activeStyleId: "klassisk",
+  prepareNote: null,
   isPreparing: false,
   isProcessing: false,
   isExporting: false,
@@ -103,6 +118,7 @@ export function GravyrApp() {
   const router = useRouter();
   const [state, setState] = useState<AppState>(initialState);
   const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [bgRemovedUrl, setBgRemovedUrl] = useState<string | null>(null);
   const [processedUrl, setProcessedUrl] = useState<string | null>(null);
   const [prepareLabel, setPrepareLabel] = useState("Förbereder din bild…");
   const requestId = useRef(0);
@@ -111,6 +127,7 @@ export function GravyrApp() {
   const bgCacheRef = useRef<ImageData | null>(null);
   const removeBgEnabledRef = useRef(false);
   const originalUrlRef = useRef<string | null>(null);
+  const bgRemovedUrlRef = useRef<string | null>(null);
   const processedUrlRef = useRef<string | null>(null);
   const algorithmRef = useRef(state.algorithm);
   const thresholdRef = useRef(state.threshold);
@@ -119,7 +136,9 @@ export function GravyrApp() {
   const gammaRef = useRef(state.gamma);
   const halftoneCellScaleRef = useRef(state.halftoneCellScale);
   const noiseAmplitudeRef = useRef(state.noiseAmplitude);
+  const skipDitherRef = useRef(state.skipDither);
   const foregroundRef = useRef<ImageData | null>(null);
+  const originalRef = useRef<ImageData | null>(null);
 
   algorithmRef.current = state.algorithm;
   thresholdRef.current = state.threshold;
@@ -128,7 +147,9 @@ export function GravyrApp() {
   gammaRef.current = state.gamma;
   halftoneCellScaleRef.current = state.halftoneCellScale;
   noiseAmplitudeRef.current = state.noiseAmplitude;
+  skipDitherRef.current = state.skipDither;
   foregroundRef.current = state.foregroundImage;
+  originalRef.current = state.originalImage;
 
   const processExtras = () => ({
     normalize: normalizeRef.current,
@@ -136,6 +157,8 @@ export function GravyrApp() {
     gamma: gammaRef.current,
     halftoneCellScale: halftoneCellScaleRef.current,
     noiseAmplitude: noiseAmplitudeRef.current,
+    skipDither: skipDitherRef.current,
+    maxSize: PROFILE.raster.maxSize,
   });
 
   const revoke = (url: string | null) => {
@@ -148,6 +171,12 @@ export function GravyrApp() {
     setOriginalUrl(url);
   }, []);
 
+  const setBgRemovedUrlSafe = useCallback((url: string | null) => {
+    revoke(bgRemovedUrlRef.current);
+    bgRemovedUrlRef.current = url;
+    setBgRemovedUrl(url);
+  }, []);
+
   const setProcessedUrlSafe = useCallback((url: string | null) => {
     revoke(processedUrlRef.current);
     processedUrlRef.current = url;
@@ -158,11 +187,13 @@ export function GravyrApp() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     requestId.current += 1;
     setOriginalUrlSafe(null);
+    setBgRemovedUrlSafe(null);
     setProcessedUrlSafe(null);
     sourceFileRef.current = null;
     bgCacheRef.current = null;
     setState((s) => ({
       ...initialState,
+      widthMm: s.widthMm,
       removeBackgroundEnabled: keepToggle
         ? s.removeBackgroundEnabled
         : false,
@@ -186,8 +217,8 @@ export function GravyrApp() {
         const result = await processImageAsync(foreground, {
           algorithm,
           threshold: clamped,
-          maxSize: PREVIEW_MAX_SIZE,
           ...extras,
+          maxSize: PROFILE.raster.maxSize,
         });
         if (id !== requestId.current) return;
         const url = await imageDataToObjectUrl(result);
@@ -243,109 +274,129 @@ export function GravyrApp() {
     return cropped;
   }, []);
 
+  /** Valfri BG-borttagning. Returnerar oditherad foreground + aktuella params. */
+  const buildForeground = async (
+    file: File,
+    original: ImageData,
+    wantBg: boolean,
+  ) => {
+    let base: ImageData = original;
+    let bgRemoved: ImageData | null = null;
+
+    if (wantBg) {
+      bgRemoved = await ensureBgRemoved(file);
+      base = bgRemoved;
+    }
+
+    return {
+      foreground: base,
+      bgRemoved,
+      removeBackgroundEnabled: wantBg,
+      normalize: normalizeRef.current,
+      contrast: contrastRef.current,
+      gamma: gammaRef.current,
+      skipDither: false,
+      prepareNote: null as string | null,
+    };
+  };
+
   const handleFile = async (file: File) => {
-    const enabled = removeBgEnabledRef.current;
-    reset(true);
-    removeBgEnabledRef.current = enabled;
+    reset(false);
+    removeBgEnabledRef.current = false;
     sourceFileRef.current = file;
     bgCacheRef.current = null;
 
+    const defaultStyle = CUSTOMER_STYLES[0]!;
+
     setState((s) => ({
       ...s,
-      removeBackgroundEnabled: enabled,
+      phase: "prepare",
+      activeStyleId: defaultStyle.id,
+      algorithm: defaultStyle.algorithm,
+      threshold: defaultStyle.threshold,
+      removeBackgroundEnabled: false,
       isPreparing: true,
       error: null,
       exportNotice: null,
+      prepareNote: null,
     }));
-    setPrepareLabel("Förbereder din bild…");
+    setPrepareLabel("Laddar bild…");
 
     try {
       const img = await loadImage(file);
       const original = imageToImageData(img);
       const origUrl = await imageDataToObjectUrl(original);
       setOriginalUrlSafe(origUrl);
-
-      let foreground: ImageData = original;
-      let bgRemoved: ImageData | null = null;
-
-      if (enabled) {
-        bgRemoved = await ensureBgRemoved(file);
-        foreground = bgRemoved;
-      }
-
-      const defaultStyle = CUSTOMER_STYLES[0];
+      setBgRemovedUrlSafe(null);
 
       setState((s) => ({
         ...s,
+        phase: "prepare",
         originalImage: original,
-        bgRemovedImage: bgRemoved,
-        foregroundImage: foreground,
-        algorithm: defaultStyle.algorithm,
-        threshold: defaultStyle.threshold,
-        removeBackgroundEnabled: enabled,
+        bgRemovedImage: null,
+        foregroundImage: original,
+        removeBackgroundEnabled: false,
         isPreparing: false,
       }));
-
-      await runProcess(
-        foreground,
-        defaultStyle.algorithm,
-        defaultStyle.threshold,
-      );
     } catch (err) {
       setState((s) => ({
         ...s,
+        phase: "idle",
         isPreparing: false,
-        isProcessing: false,
         error: messageForError(err),
       }));
     }
   };
 
+  /** Växlar endast källbild i prepare-dialogen — dither körs efter Klar. */
   const setRemoveBackgroundEnabled = async (enabled: boolean) => {
     removeBgEnabledRef.current = enabled;
-    setState((s) => ({ ...s, removeBackgroundEnabled: enabled, error: null }));
 
-    const original = state.originalImage;
-    if (!original) return;
+    const original = originalRef.current ?? state.originalImage;
+    const file = sourceFileRef.current;
+    if (!original || !file) {
+      setState((s) => ({ ...s, removeBackgroundEnabled: enabled }));
+      return;
+    }
 
     if (!enabled) {
       setState((s) => ({
         ...s,
-        foregroundImage: original,
         removeBackgroundEnabled: false,
-      }));
-      scheduleProcess(original, algorithmRef.current, thresholdRef.current, true);
-      return;
-    }
-
-    const file = sourceFileRef.current;
-    if (!file) {
-      setState((s) => ({
-        ...s,
-        error: messageForError(new Error("PROCESS_FAIL")),
+        foregroundImage: original,
+        error: null,
       }));
       return;
     }
 
-    if (bgCacheRef.current || state.bgRemovedImage) {
-      const cached = bgCacheRef.current ?? state.bgRemovedImage!;
-      bgCacheRef.current = cached;
+    if (bgCacheRef.current && bgRemovedUrlRef.current) {
       setState((s) => ({
         ...s,
-        bgRemovedImage: cached,
-        foregroundImage: cached,
         removeBackgroundEnabled: true,
+        bgRemovedImage: bgCacheRef.current,
+        foregroundImage: bgCacheRef.current,
+        error: null,
       }));
-      scheduleProcess(cached, algorithmRef.current, thresholdRef.current, true);
       return;
     }
 
     const id = ++requestId.current;
-    setState((s) => ({ ...s, isPreparing: true, error: null }));
+    setState((s) => ({
+      ...s,
+      removeBackgroundEnabled: true,
+      isPreparing: true,
+      error: null,
+    }));
     setPrepareLabel("Tar bort bakgrund…");
+
     try {
       const bgRemoved = await ensureBgRemoved(file);
       if (id !== requestId.current) return;
+
+      const bgUrl = await imageDataToObjectUrl(bgRemoved);
+      if (id !== requestId.current) return;
+      setBgRemovedUrlSafe(bgUrl);
+
       setState((s) => ({
         ...s,
         bgRemovedImage: bgRemoved,
@@ -353,7 +404,6 @@ export function GravyrApp() {
         removeBackgroundEnabled: true,
         isPreparing: false,
       }));
-      await runProcess(bgRemoved, algorithmRef.current, thresholdRef.current);
     } catch (err) {
       if (id !== requestId.current) return;
       removeBgEnabledRef.current = false;
@@ -367,20 +417,123 @@ export function GravyrApp() {
     }
   };
 
-  const applyStyle = (style: CustomerStyle) => {
+  const confirmPrepare = async () => {
+    const original = originalRef.current ?? state.originalImage;
+    const foreground = removeBgEnabledRef.current
+      ? (bgCacheRef.current ?? state.bgRemovedImage ?? original)
+      : original;
+    if (!foreground) return;
+
+    const defaultStyle =
+      CUSTOMER_STYLES.find((s) => s.id === state.activeStyleId) ??
+      CUSTOMER_STYLES[0]!;
+
+    setState((s) => ({
+      ...s,
+      phase: "ready",
+      foregroundImage: foreground,
+      algorithm: defaultStyle.algorithm,
+      threshold: defaultStyle.threshold,
+      activeStyleId: defaultStyle.id,
+      error: null,
+      exportNotice: null,
+    }));
+
+    await runProcess(
+      foreground,
+      defaultStyle.algorithm,
+      defaultStyle.threshold,
+      {
+        ...processExtras(),
+        maxSize: PROFILE.raster.maxSize,
+      },
+    );
+  };
+
+  const applyStyle = async (style: CustomerStyle) => {
+    const file = sourceFileRef.current;
+    const original = originalRef.current;
+    if (!file || !original) {
+      setState((s) => ({
+        ...s,
+        algorithm: style.algorithm,
+        threshold: style.threshold,
+        activeStyleId: style.id,
+        skipDither: false,
+      }));
+      return;
+    }
+
+    const id = ++requestId.current;
     setState((s) => ({
       ...s,
       algorithm: style.algorithm,
       threshold: style.threshold,
+      activeStyleId: style.id,
+      isPreparing: true,
+      error: null,
     }));
-    const foreground = foregroundRef.current;
-    if (foreground) {
-      scheduleProcess(foreground, style.algorithm, style.threshold, true);
+    setPrepareLabel("Byter stil…");
+
+    try {
+      const built = await buildForeground(
+        file,
+        original,
+        removeBgEnabledRef.current,
+      );
+      if (id !== requestId.current) return;
+
+      normalizeRef.current = built.normalize;
+      contrastRef.current = built.contrast;
+      gammaRef.current = built.gamma;
+      skipDitherRef.current = built.skipDither;
+      removeBgEnabledRef.current = built.removeBackgroundEnabled;
+
+      if (built.bgRemoved) {
+        const bgUrl = await imageDataToObjectUrl(built.bgRemoved);
+        if (id !== requestId.current) return;
+        setBgRemovedUrlSafe(bgUrl);
+      } else {
+        setBgRemovedUrlSafe(null);
+      }
+
+      setState((s) => ({
+        ...s,
+        bgRemovedImage: built.bgRemoved,
+        foregroundImage: built.foreground,
+        algorithm: style.algorithm,
+        threshold: style.threshold,
+        activeStyleId: style.id,
+        normalizeLevelsEnabled: built.normalize,
+        contrast: built.contrast,
+        gamma: built.gamma,
+        skipDither: built.skipDither,
+        removeBackgroundEnabled: built.removeBackgroundEnabled,
+        prepareNote: built.prepareNote,
+        isPreparing: false,
+      }));
+
+      await runProcess(built.foreground, style.algorithm, style.threshold, {
+        normalize: built.normalize,
+        contrast: built.contrast,
+        gamma: built.gamma,
+        skipDither: built.skipDither,
+        halftoneCellScale: halftoneCellScaleRef.current,
+        noiseAmplitude: noiseAmplitudeRef.current,
+        maxSize: PROFILE.raster.maxSize,
+      });
+    } catch (err) {
+      if (id !== requestId.current) return;
+      setState((s) => ({
+        ...s,
+        isPreparing: false,
+        error: messageForError(err),
+      }));
     }
   };
 
   const setAlgorithm = (algorithm: DitherAlgorithm) => {
-    setState((s) => ({ ...s, algorithm }));
+    setState((s) => ({ ...s, algorithm, activeStyleId: null }));
     const foreground = foregroundRef.current;
     if (foreground) {
       scheduleProcess(foreground, algorithm, thresholdRef.current, true);
@@ -448,6 +601,18 @@ export function GravyrApp() {
     }
   };
 
+  const exportOpts = () => ({
+    normalize: state.normalizeLevelsEnabled,
+    contrast: state.contrast,
+    gamma: state.gamma,
+    halftoneCellScale: state.halftoneCellScale,
+    noiseAmplitude: state.noiseAmplitude,
+    maxSize: PROFILE.raster.maxSize,
+    skipDither: state.skipDither,
+    widthMm: state.widthMm,
+    profile: PROFILE,
+  });
+
   const handleExport = async () => {
     if (!state.foregroundImage) return;
     setState((s) => ({ ...s, isExporting: true, error: null, exportNotice: null }));
@@ -456,19 +621,13 @@ export function GravyrApp() {
         state.foregroundImage,
         state.algorithm,
         state.threshold,
-        {
-          normalize: state.normalizeLevelsEnabled,
-          contrast: state.contrast,
-          gamma: state.gamma,
-          halftoneCellScale: state.halftoneCellScale,
-          noiseAmplitude: state.noiseAmplitude,
-        },
+        exportOpts(),
       );
       downloadBlob(blob, filename);
       setState((s) => ({
         ...s,
         isExporting: false,
-        exportNotice: `PNG sparad: ${filename}`,
+        exportNotice: `PNG sparad: ${filename} (${PROFILE.raster.maxSize}px max — samma som förhandsvisning)`,
       }));
     } catch {
       setState((s) => ({
@@ -488,27 +647,18 @@ export function GravyrApp() {
       exportNotice: null,
     }));
     try {
-      const { blob, filename } = await exportSVG(
-        state.foregroundImage,
-        state.algorithm,
-        state.threshold,
-        {
-          normalize: state.normalizeLevelsEnabled,
-          contrast: state.contrast,
-          gamma: state.gamma,
-          halftoneCellScale: state.halftoneCellScale,
-          noiseAmplitude: state.noiseAmplitude,
-        },
-      );
+      const { blob, filename, widthMm, heightMm, dpi, widthPx, heightPx } =
+        await exportSVG(
+          state.foregroundImage,
+          state.algorithm,
+          state.threshold,
+          exportOpts(),
+        );
       downloadBlob(blob, filename);
-      const size = exportSizeMm(
-        state.foregroundImage.width,
-        state.foregroundImage.height,
-      );
       setState((s) => ({
         ...s,
         isExportingSvg: false,
-        exportNotice: `SVG sparad: ${filename} (${size.widthMm.toFixed(1)} × ${size.heightMm.toFixed(1)} mm @ ${EXPORT_DPI} DPI)`,
+        exportNotice: `SVG sparad: ${filename} (${widthMm.toFixed(1)} × ${heightMm.toFixed(1)} mm, ${widthPx}×${heightPx} px @ ${Math.round(dpi)} DPI effektiv)`,
       }));
     } catch {
       setState((s) => ({
@@ -517,6 +667,10 @@ export function GravyrApp() {
         error: messageForError(new Error("EXPORT_SVG_FAIL")),
       }));
     }
+  };
+
+  const setWidthMm = (widthMm: number) => {
+    setState((s) => ({ ...s, widthMm }));
   };
 
   const handleQuote = async () => {
@@ -528,17 +682,12 @@ export function GravyrApp() {
       exportNotice: null,
     }));
     try {
+      // Offert använder alltid pixel-PNG för stabil kundfil
       const { blob, filename, metadata } = await exportPNG(
         state.foregroundImage,
         state.algorithm,
         state.threshold,
-        {
-          normalize: state.normalizeLevelsEnabled,
-          contrast: state.contrast,
-          gamma: state.gamma,
-          halftoneCellScale: state.halftoneCellScale,
-          noiseAmplitude: state.noiseAmplitude,
-        },
+        exportOpts(),
       );
       downloadBlob(blob, filename);
       saveQuoteSession({
@@ -573,11 +722,13 @@ export function GravyrApp() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       revoke(originalUrlRef.current);
+      revoke(bgRemovedUrlRef.current);
       revoke(processedUrlRef.current);
     };
   }, []);
 
-  const hasImage = Boolean(state.originalImage || state.foregroundImage);
+  const isPrepare = state.phase === "prepare";
+  const isReady = state.phase === "ready";
   const busy =
     state.isPreparing ||
     state.isProcessing ||
@@ -585,154 +736,164 @@ export function GravyrApp() {
     state.isExportingSvg ||
     state.isPreparingQuote;
   const isSimple = state.settingsMode === "simple";
+  const exportDisabled = !state.foregroundImage || state.isPreparing;
+  const preparePreviewSrc = state.removeBackgroundEnabled
+    ? (bgRemovedUrl ?? originalUrl)
+    : originalUrl;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:py-10">
-      {!hasImage && !state.isPreparing && (
+      {state.phase === "idle" && (
         <ImageUploader disabled={busy} onFile={handleFile} />
       )}
 
-      {(hasImage || state.isPreparing) && (
+      <PrepareImageDialog
+        open={isPrepare}
+        imageSrc={preparePreviewSrc}
+        removeBackgroundEnabled={state.removeBackgroundEnabled}
+        isBusy={state.isPreparing}
+        statusLabel={state.isPreparing ? prepareLabel : null}
+        onRemoveBackgroundChange={(v) => {
+          void setRemoveBackgroundEnabled(v);
+        }}
+        onConfirm={() => {
+          void confirmPrepare();
+        }}
+        onCancel={() => reset(false)}
+      />
+
+      {isReady && (
         <>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => reset(false)}
+              disabled={
+                state.isExporting ||
+                state.isExportingSvg ||
+                state.isPreparingQuote
+              }
+            >
+              Välj ny bild
+            </Button>
+          </div>
+
           <ImagePreview
-            src={state.isPreparing ? originalUrl : processedUrl}
-            alt={
-              state.isPreparing
-                ? "Uppladdad bild"
-                : "Förhandsvisning av lasergravyr"
-            }
-            isProcessing={state.isPreparing || state.isProcessing}
+            src={processedUrl}
+            alt="Förhandsvisning av lasergravyr"
+            isProcessing={state.isProcessing}
             footer={
-              hasImage ? (
-                <ThresholdSlider
-                  variant="glass"
-                  value={state.threshold}
-                  onChange={setThreshold}
-                  disabled={busy}
-                />
-              ) : null
+              <ThresholdSlider
+                variant="glass"
+                value={state.threshold}
+                onChange={setThreshold}
+                disabled={busy || state.skipDither}
+              />
             }
           />
 
-          {state.isPreparing && (
-            <p className="text-center text-sm text-muted-foreground" aria-live="polite">
-              {prepareLabel}
-            </p>
-          )}
+          <div className="space-y-5 rounded-xl border border-border bg-card p-4 sm:p-5">
+            <SettingsModeToggle
+              value={state.settingsMode}
+              onChange={(settingsMode) => {
+                setState((s) => ({ ...s, settingsMode }));
+              }}
+              disabled={busy}
+            />
 
-          {hasImage && (
-            <div className="space-y-5 rounded-xl border border-border bg-card p-4 sm:p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <SettingsModeToggle
-                  value={state.settingsMode}
-                  onChange={(settingsMode) =>
-                    setState((s) => ({ ...s, settingsMode }))
-                  }
-                  disabled={busy}
+            {state.prepareNote && (
+              <p className="text-xs text-muted-foreground" role="status">
+                {state.prepareNote}
+              </p>
+            )}
+
+            <SizeMmControl
+              value={state.widthMm}
+              onChange={setWidthMm}
+              disabled={busy}
+            />
+
+            {isSimple ? (
+              <StylePicker
+                activeStyleId={state.activeStyleId}
+                onSelect={(style) => {
+                  void applyStyle(style);
+                }}
+                disabled={busy}
+              />
+            ) : (
+              <div className="space-y-4">
+                <NormalizeLevelsToggle
+                  checked={state.normalizeLevelsEnabled}
+                  onCheckedChange={setNormalizeLevelsEnabled}
+                  disabled={busy || state.skipDither}
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => reset(true)}
-                  disabled={
-                    state.isExporting ||
-                    state.isExportingSvg ||
-                    state.isPreparingQuote
-                  }
-                >
-                  Välj ny bild
-                </Button>
+
+                <DitherSelector
+                  value={state.algorithm}
+                  onChange={setAlgorithm}
+                  disabled={busy || state.skipDither}
+                  label="Teknisk algoritm"
+                />
+
+                <ToneControls
+                  contrast={state.contrast}
+                  gamma={state.gamma}
+                  onContrastChange={setContrast}
+                  onGammaChange={setGamma}
+                  disabled={busy || state.skipDither}
+                />
+
+                {state.algorithm === "halftone" && (
+                  <HalftoneDensitySlider
+                    value={state.halftoneCellScale}
+                    onChange={setHalftoneCellScale}
+                    disabled={busy || state.skipDither}
+                  />
+                )}
+
+                {state.algorithm === "randomThreshold" && (
+                  <GrainSlider
+                    value={state.noiseAmplitude}
+                    onChange={setNoiseAmplitude}
+                    disabled={busy || state.skipDither}
+                  />
+                )}
               </div>
+            )}
 
-              {isSimple ? (
-                <StylePicker
-                  algorithm={state.algorithm}
-                  threshold={state.threshold}
-                  onSelect={applyStyle}
-                  disabled={busy}
-                />
-              ) : (
-                <div className="space-y-4">
-                  <RemoveBackgroundToggle
-                    checked={state.removeBackgroundEnabled}
-                    onCheckedChange={(v) => {
-                      void setRemoveBackgroundEnabled(v);
-                    }}
-                    disabled={busy}
-                  />
-
-                  <NormalizeLevelsToggle
-                    checked={state.normalizeLevelsEnabled}
-                    onCheckedChange={setNormalizeLevelsEnabled}
-                    disabled={busy}
-                  />
-
-                  <DitherSelector
-                    value={state.algorithm}
-                    onChange={setAlgorithm}
-                    disabled={busy}
-                    label="Teknisk algoritm"
-                  />
-
-                  <ToneControls
-                    contrast={state.contrast}
-                    gamma={state.gamma}
-                    onContrastChange={setContrast}
-                    onGammaChange={setGamma}
-                    disabled={busy}
-                  />
-
-                  {state.algorithm === "halftone" && (
-                    <HalftoneDensitySlider
-                      value={state.halftoneCellScale}
-                      onChange={setHalftoneCellScale}
-                      disabled={busy}
-                    />
-                  )}
-
-                  {state.algorithm === "randomThreshold" && (
-                    <GrainSlider
-                      value={state.noiseAmplitude}
-                      onChange={setNoiseAmplitude}
-                      disabled={busy}
-                    />
-                  )}
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                    <ExportButton
-                      onClick={handleExport}
-                      disabled={!state.foregroundImage || state.isPreparing}
-                      isExporting={state.isExporting}
-                    />
-                    <ExportSvgButton
-                      onClick={handleExportSvg}
-                      disabled={!state.foregroundImage || state.isPreparing}
-                      isExporting={state.isExportingSvg}
-                    />
-                  </div>
-                </div>
-              )}
-
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <ExportButton
+                onClick={handleExport}
+                disabled={exportDisabled}
+                isExporting={state.isExporting}
+              />
+              <ExportSvgButton
+                onClick={handleExportSvg}
+                disabled={exportDisabled}
+                isExporting={state.isExportingSvg}
+              />
               <QuoteButton
                 onClick={() => {
                   void handleQuote();
                 }}
-                disabled={!state.foregroundImage || state.isPreparing}
+                disabled={exportDisabled}
                 isPreparing={state.isPreparingQuote}
               />
-
-              {state.exportNotice && (
-                <p
-                  className="text-sm text-muted-foreground"
-                  role="status"
-                  aria-live="polite"
-                >
-                  {state.exportNotice}
-                </p>
-              )}
             </div>
-          )}
+
+            {state.exportNotice && (
+              <p
+                className="text-sm text-muted-foreground"
+                role="status"
+                aria-live="polite"
+              >
+                {state.exportNotice}
+              </p>
+            )}
+          </div>
         </>
       )}
 
@@ -747,7 +908,7 @@ export function GravyrApp() {
             variant="ghost"
             size="sm"
             className="mt-2"
-            onClick={() => reset(true)}
+            onClick={() => reset(false)}
           >
             Välj ny bild
           </Button>

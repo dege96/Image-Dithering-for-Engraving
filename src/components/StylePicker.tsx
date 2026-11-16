@@ -3,26 +3,21 @@
 import { cn } from "@/lib/utils";
 import {
   CUSTOMER_STYLES,
-  customerStyleForPreset,
   type CustomerStyle,
-  type DitherAlgorithm,
+  type CustomerStyleId,
 } from "@/presets/default";
 
 type StylePickerProps = {
-  algorithm: DitherAlgorithm;
-  threshold: number;
+  activeStyleId: CustomerStyleId | null;
   onSelect: (style: CustomerStyle) => void;
   disabled?: boolean;
 };
 
 export function StylePicker({
-  algorithm,
-  threshold,
+  activeStyleId,
   onSelect,
   disabled,
 }: StylePickerProps) {
-  const activeStyle = customerStyleForPreset(algorithm, threshold);
-
   return (
     <div className="space-y-2">
       <p className="text-sm font-medium" id="gravyr-stil-label">
@@ -34,7 +29,7 @@ export function StylePicker({
         className="grid gap-2 sm:grid-cols-2"
       >
         {CUSTOMER_STYLES.map((style) => {
-          const selected = activeStyle === style.id;
+          const selected = activeStyleId === style.id;
           return (
             <button
               key={style.id}
@@ -65,7 +60,7 @@ export function StylePicker({
           );
         })}
       </div>
-      {activeStyle == null && (
+      {activeStyleId == null && (
         <p className="text-xs text-muted-foreground">
           Anpassad stil vald under avancerade inställningar.
         </p>

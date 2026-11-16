@@ -19,7 +19,13 @@ export const MAX_THRESHOLD = 55;
 export const DEFAULT_THRESHOLD = 50;
 
 export const DEFAULT_ALGORITHM: DitherAlgorithm = "atkinson";
-export const PREVIEW_MAX_SIZE = 1200;
+/** Max sidlängd för SVG-export / profilstyrd raster (färre LightBurn-punkter). */
+export const SVG_EXPORT_MAX_SIZE = 1000;
+/**
+ * Preview använder samma max som SVG via engravingProfile.raster.maxSize.
+ * Konstanten behålls för bakåtkompatibilitet.
+ */
+export const PREVIEW_MAX_SIZE = SVG_EXPORT_MAX_SIZE;
 export const CROP_PADDING = 12;
 export const SLIDER_DEBOUNCE_MS = 75;
 export const APP_VERSION = "1.0";

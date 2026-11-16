@@ -66,6 +66,9 @@ export type ExportProcessOptions = {
   gamma?: number;
   halftoneCellScale?: number;
   noiseAmplitude?: number;
+  /** Max sidlängd — sätt samma som preview/SVG för paritet. */
+  maxSize?: number;
+  skipDither?: boolean;
 };
 
 export async function exportPNG(
@@ -78,11 +81,13 @@ export async function exportPNG(
   const processed = await processImageAsync(foregroundImage, {
     algorithm,
     threshold: clamped,
+    maxSize: options?.maxSize,
     normalize: options?.normalize,
     contrast: options?.contrast,
     gamma: options?.gamma,
     halftoneCellScale: options?.halftoneCellScale,
     noiseAmplitude: options?.noiseAmplitude,
+    skipDither: options?.skipDither,
   });
 
   const metadata: ExportMetadata = {

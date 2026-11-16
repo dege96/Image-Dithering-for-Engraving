@@ -40,7 +40,34 @@ export type ProcessImageOptions = {
   halftoneCellScale?: number;
   /** Random-threshold brusamplitud. Default 32. */
   noiseAmplitude?: number;
+  /**
+   * Hoppa över dither (bilden är redan binär).
+   * Gör endast resize + grayscale + hård 50 %-kvantisering.
+   */
+  skipDither?: boolean;
 };
+
+/** Kvantisera redan binär-liknande grayscale utan error diffusion. */
+function quantizeBinary(imageData: ImageData): ImageData {
+  const { width, height, data } = imageData;
+  const out = new ImageData(width, height);
+  for (let i = 0; i < data.length; i += 4) {
+    const alpha = data[i + 3]!;
+    if (alpha === 0) {
+      out.data[i] = 255;
+      out.data[i + 1] = 255;
+      out.data[i + 2] = 255;
+      out.data[i + 3] = 0;
+      continue;
+    }
+    const v = data[i]! < 128 ? 0 : 255;
+    out.data[i] = v;
+    out.data[i + 1] = v;
+    out.data[i + 2] = v;
+    out.data[i + 3] = 255;
+  }
+  return out;
+}
 
 export function processImage(
   source: ImageData,
@@ -61,6 +88,11 @@ export function processImage(
       ? resizeImageData(source, options.maxSize)
       : source;
   const gray = toGrayscale(resized);
+
+  if (options.skipDither) {
+    return quantizeBinary(gray);
+  }
+
   const leveled =
     options.normalize === true ? normalizeLevels(gray) : gray;
   const prepared = adjustTone(leveled, contrast, gamma);

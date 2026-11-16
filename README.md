@@ -34,17 +34,22 @@ NEXT_PUBLIC_QUOTE_EMAIL=din@epost.se
 ## Flöde
 
 1. Ladda upp JPG/PNG/WebP (max 25 MB)
-2. Välj gravyrstil: **Klassisk**, **Abstrakt**, **Grynig** eller **Halftone**
-3. Tryck **Skicka för gravyr** — PNG laddas ner och offertsidan öppnas
-4. Fyll i formuläret och bifoga PNG:en i mejlet
-5. Under **Avancerade inställningar**: ta bort bakgrund, teknisk algoritm, tröskel, ladda ner PNG/SVG
+2. Standardstil **Porträtt** analyserar bilden och förbereder den för ek + 5 W diodlaser
+3. Justera **Bredd (mm)** vid behov (default 80 mm)
+4. Eller välj **Klassisk**, **Abstrakt**, **Grynig** eller **Halftone**
+5. Tryck **Skicka för gravyr** — PNG laddas ner och offertsidan öppnas
+6. Fyll i formuläret och bifoga PNG:en i mejlet
+7. Under **Avancerade inställningar**: ta bort bakgrund, teknisk algoritm, tröskel, ladda ner PNG/SVG
 
 ### Teknik
 
-- Preview: Rec.709-grayscale + auto-levels + dither via Web Worker (max 1200 px)
-- Export: samma pipeline i full upplösning via worker
-- SVG: svarta run-length-`<rect>`, storlek i **mm** (default 254 DPI), ingen vit bakgrund
+- Profil: `oak-5w-diode` v1 (`src/presets/engravingProfile.ts`) — versionshanterade mm/DPI/raster/dither-defaults
+- Porträtt: `analyzePortrait` → `preparePortrait` (villkorad ton/brus/BG) → en dither-pass
+- Preview / PNG / SVG: samma `processImage`-pipeline och samma `raster.maxSize` (1000 px) för paritet
+- SVG: svarta 2D-packade `<rect>`, storlek i **mm**, metadata med **effektiv** DPI
 - Metadata i PNG tEXt / SVG-kommentar
+- Laserhastighet/effekt är medvetet utelämnade tills fysiska tester på ek
+- Backup om pixel-dither inte räcker: [docs/BACKUP_PRICKVEKTOR.md](docs/BACKUP_PRICKVEKTOR.md)
 
 ## Manuell bildkontroll
 
@@ -67,4 +72,4 @@ Se [docs/IMAGE_TEST_CHECKLIST.md](docs/IMAGE_TEST_CHECKLIST.md).
 - Next.js App Router, TypeScript, Tailwind CSS, shadcn/ui
 - Web Worker för `processImage`
 - Vitest för enhetstester
-- Utbytbart `removeBackground`-interface (`@imgly/background-removal`)
+- Utbytbart `removeBackground`-interface (`@bg0/browser`, BiRefNet-lite)

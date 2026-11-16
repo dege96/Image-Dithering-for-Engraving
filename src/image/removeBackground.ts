@@ -1,6 +1,6 @@
 /**
  * Utbytbart interface för bakgrundsborttagning.
- * Byt adapter utan att ändra resten av pipelinen.
+ * Adapter: @bg0/browser (BiRefNet-lite, WebGPU/WASM).
  */
 export type RemoveBackgroundInput =
   | File
@@ -73,12 +73,11 @@ async function toBlob(input: RemoveBackgroundInput): Promise<Blob> {
 
 export const removeBackground: RemoveBackground = async (input) => {
   try {
-    const { removeBackground: imglyRemove } = await import(
-      "@imgly/background-removal"
-    );
+    const { removeBackground: bg0Remove } = await import("@bg0/browser");
     const blob = await toBlob(input);
-    const result = await imglyRemove(blob);
-    return blobToImageData(result);
+    // quality=quality: lätt mask-refinement, hårdare kanter (bättre för gravyr/dither)
+    const result = await bg0Remove(blob, { quality: "quality" });
+    return blobToImageData(result.blob);
   } catch {
     throw new Error("BG_FAIL");
   }

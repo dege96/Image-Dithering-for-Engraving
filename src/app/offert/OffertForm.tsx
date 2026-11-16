@@ -77,8 +77,7 @@ export function OffertForm() {
           className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
         >
           Offert via e-post är inte tillgänglig just nu. Gå tillbaka till
-          preview och ladda ner PNG under Avancerade inställningar, eller
-          kontakta verkstaden direkt.
+          preview och ladda ner PNG, eller kontakta verkstaden direkt.
         </div>
       )}
 
